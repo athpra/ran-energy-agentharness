@@ -16,7 +16,7 @@ import pandas as pd
 
 from agent.harness   import AgentHarness
 from agent.context   import ALL_TOOLS
-from experiments.common import get_llm, make_run_dir, save_results, make_sim_fns, _kpi_to_text
+from experiments.common import get_llm, get_current_kpis, make_run_dir, save_results, make_sim_fns, _kpi_to_text
 
 
 def run(
@@ -38,10 +38,11 @@ def run(
 
     ts = pd.Timestamp.now()
     for i in range(n_iterations):
-        kpis          = scenario.simulators[0].get_kpis()
-        cell_ids      = list(kpis.keys())
-        utilization   = {cid: kpis[cid].get("utilization_pct", 0) for cid in cell_ids}
-        kpi_summary   = _kpi_to_text(kpis)
+        kpis        = get_current_kpis(scenario)
+        site_keys   = sorted(kpis["per_site"].keys())
+        cell_ids    = list(range(len(site_keys)))
+        utilization = {j: kpis["per_site"][k]["n1_prb"] for j, k in enumerate(site_keys)}
+        kpi_summary = _kpi_to_text(kpis)
 
         result = harness.run_iteration(
             iteration=i + 1,

@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import time
 
-from experiments.common import get_llm, make_run_dir, save_results, make_sim_fns, _kpi_to_text
+from experiments.common import get_llm, get_current_kpis, make_run_dir, save_results, make_sim_fns, _kpi_to_text
 from agent.planner import plan
 
 
@@ -33,7 +33,7 @@ def run(
     for i in range(n_iterations):
         t0 = time.time()
 
-        kpi_summary = _kpi_to_text(scenario.simulators[0].get_kpis())
+        kpi_summary = _kpi_to_text(get_current_kpis(scenario))
 
         # No tool context — empty block
         proposed, planner_raw, t_plan = plan(

@@ -15,7 +15,7 @@ import json
 import time
 from pathlib import Path
 
-from experiments.common import make_run_dir, save_results
+from experiments.common import get_current_kpis, make_run_dir, save_results
 
 
 def rule_policy(
@@ -47,9 +47,17 @@ def run(
 
     results = []
     for i in range(n_iterations):
-        t0       = time.time()
-        cell_kpis = scenario.simulators[0].get_kpis()
-        actions   = rule_policy(cell_kpis, sleep_threshold_pct, wake_threshold_pct)
+        t0      = time.time()
+        raw     = get_current_kpis(scenario)
+        sk      = sorted(raw["per_site"].keys())
+        cell_kpis = {
+            j: {
+                "utilization_pct": raw["per_site"][k]["n1_prb"],
+                "sleep_state":     1 if raw["per_site"][k]["n1_sleeping"] else 0,
+            }
+            for j, k in enumerate(sk)
+        }
+        actions = rule_policy(cell_kpis, sleep_threshold_pct, wake_threshold_pct)
 
         sim_summary, post_kpis = sim_apply_fn(actions) if actions else (
             "No actions — nothing applied.", {}

@@ -54,44 +54,177 @@ def get_llm() -> ChatOpenAI:
     )
 
 
+# ── Traffic profiles (mirrors PoC VTZ model) ──────────────────────────────────
+
+_TRAFFIC_PROFILES = [
+    {"name": "Night",      "start_hour": 0,  "duration_hours": 8,  "ue_ratio": 0.1},
+    {"name": "Early",      "start_hour": 8,  "duration_hours": 1,  "ue_ratio": 1.5},
+    {"name": "Morning",    "start_hour": 9,  "duration_hours": 4,  "ue_ratio": 1.0},
+    {"name": "Afternoon",  "start_hour": 13, "duration_hours": 5,  "ue_ratio": 0.5},
+    {"name": "Evening_1",  "start_hour": 18, "duration_hours": 2,  "ue_ratio": 2.0},
+    {"name": "Evening_2",  "start_hour": 20, "duration_hours": 2,  "ue_ratio": 1.0},
+    {"name": "Late Night", "start_hour": 22, "duration_hours": 2,  "ue_ratio": 0.1},
+]
+
+DEFAULT_THROUGHPUT_MBPS = 8.0
+SIM_DURATION            = 10   # seconds per simulation run
+
+
+def _get_profile(ts: pd.Timestamp) -> dict:
+    hour = ts.hour
+    for p in _TRAFFIC_PROFILES:
+        if p["start_hour"] <= hour < p["start_hour"] + p["duration_hours"]:
+            return p
+    return _TRAFFIC_PROFILES[0]
+
+
+def _compute_kpis(sim_ue: pd.DataFrame, sim_cell: pd.DataFrame) -> dict:
+    """Convert VIAVI DataFrames to a summary dict the agent can consume."""
+    avg_thp = float(sim_ue["DRB.UEThpDl"].mean()) if len(sim_ue) > 0 else 0.0
+    per_site: dict = {}
+
+    for _, row in sim_cell.iterrows():
+        parts = row["Viavi.Cell.Name"].split("/")
+        site  = f"{parts[0]}/{parts[2]}"
+        band  = parts[1]
+        if site not in per_site:
+            per_site[site] = {"n1_prb": 0.0, "n12_prb": 0.0, "avg_qos": 0.0, "n1_sleeping": False}
+        if band == "N1":
+            per_site[site]["n1_prb"]      = float(row.get("RRU.PrbTotDl", 0))
+            per_site[site]["n1_sleeping"] = bool(row.get("Viavi.isEnergySaving", 0))
+        elif band == "N12":
+            per_site[site]["n12_prb"] = float(row.get("RRU.PrbTotDl", 0))
+
+    for _, row in sim_ue.iterrows():
+        parts = row["Viavi.Cell.Name"].split("/")
+        site  = f"{parts[0]}/{parts[2]}"
+        if site in per_site:
+            per_site[site].setdefault("_qos", []).append(float(row["DRB.UEThpDl"]))
+
+    for s in per_site.values():
+        if "_qos" in s:
+            s["avg_qos"] = sum(s.pop("_qos")) / len(s["_qos"])
+
+    sleeping = sum(1 for s in per_site.values() if s["n1_sleeping"])
+    return {
+        "avg_throughput_mbps": round(avg_thp, 3),
+        "sleeping_cells":      sleeping,
+        "total_cells":         len(per_site) * 2,
+        "per_site":            per_site,
+    }
+
+
 # ── VIAVI RSG simulation wrappers ─────────────────────────────────────────────
 
 def make_sim_fns(scenario):
     """
-    Return (sim_test_fn, sim_apply_fn) wired to a VIAVI AI RSG Scenario object.
+    Return (sim_test_fn, sim_apply_fn).
 
-    sim_test_fn  — sends actions to Sim 1 (test/probe), returns (summary, kpi_dict)
-    sim_apply_fn — sends actions to Sim 2 (apply),       returns (summary, kpi_dict)
+    Both functions have signature:
+        fn(actions: list[dict]) -> (summary_str, kpi_dict)
+
+    where each action is {"action": "sleep"|"wake", "cell_id": int, ...}
+
+    Internally:
+    - cell_id integers are mapped to VIAVI full cell names ("Site/N1/Sector")
+      on the first simulation run (names discovered from CellReports output).
+    - Accumulated sleep state is tracked here and replayed at the start of
+      every simulation — the SDK is stateless, so we must reapply history.
+    - sim_test_fn does NOT update accumulated state (probe only).
+    - sim_apply_fn DOES update accumulated state (confirmed actions).
+    - Traffic profile (UE count) is set from current wall-clock time.
     """
-    def _run(sim_index: int, actions: list[dict]) -> tuple[str, dict]:
-        sim = scenario.simulators[sim_index]
-        for a in actions:
-            cell = sim.get_cell(a["cell_id"])
+    cell_sleep_state:   dict[str, bool]       = {}   # cell_name -> is_sleeping
+    cell_name_map:      dict[int, str]         = {}   # int id -> full VIAVI name
+    original_ue_dist:   list[list[int]]        = []   # cached from scenario config
+
+    def _cache_ue_dist() -> list[list[int]]:
+        if not original_ue_dist:
+            for grp in scenario.config["UE_Configuration"]["UE_Groups"]:
+                original_ue_dist.append([d["ues"] for d in grp.get("distribution", [])])
+        return original_ue_dist
+
+    def _apply_profile(profile: dict) -> None:
+        orig = _cache_ue_dist()
+        for g, grp in enumerate(scenario.config["UE_Configuration"]["UE_Groups"]):
+            for d, dist in enumerate(grp.get("distribution", [])):
+                dist["ues"] = max(1, int(orig[g][d] * profile["ue_ratio"]))
+            for svc in grp.get("serviceConfig", []):
+                svc["targetTput_Mbps"] = DEFAULT_THROUGHPUT_MBPS
+
+    def _run(actions: list[dict], update_state: bool) -> tuple[str, dict]:
+        profile = _get_profile(pd.Timestamp.now())
+        _apply_profile(profile)
+
+        scenario.config["System"]["batch_mode"] = True
+        scenario.config["System"]["duration"]   = SIM_DURATION
+
+        sim = scenario.simulation(force_start=True, adk_pace=True)
+        sim.start()
+
+        # Replay accumulated sleep state so each fresh simulation starts from
+        # the current network configuration, not a clean slate.
+        for cell_name, is_sleeping in cell_sleep_state.items():
+            cmd = "turn_off" if is_sleeping else "turn_on"
+            sim.command(cmd, cell=cell_name, reason="accumulated state")
+
+        # Apply new actions for this iteration
+        for a in (actions or []):
+            cell_name = cell_name_map.get(a["cell_id"], str(a["cell_id"]))
             if a["action"] == "sleep":
-                cell.sleep()
+                sim.command("turn_off", cell=cell_name, reason=a.get("reason", "energy optimization"))
             elif a["action"] == "wake":
-                cell.wake()
-        sim.step()
-        kpis = sim.get_kpis()
+                sim.command("turn_on",  cell=cell_name, reason=a.get("reason", "capacity needed"))
 
-        lines = [f"Sim {sim_index + 1} post-action KPIs:"]
-        for cell_id, k in kpis.items():
-            lines.append(
-                f"  Cell {cell_id}: throughput={k.get('throughput_mbps', 'N/A')} Mbps  "
-                f"util={k.get('utilization_pct', 'N/A')}%  "
-                f"sleep={k.get('sleep_state', 'N/A')}"
+        sim.run_for(f"{SIM_DURATION}s")
+        sim_ue   = sim.query("UEReports",   start=SIM_DURATION - 1, stop=SIM_DURATION)
+        sim_cell = sim.query("CellReports", start=SIM_DURATION - 1, stop=SIM_DURATION)
+        sim.finish()
+
+        sim_cell = sim_cell.drop_duplicates(subset=["Viavi.Cell.Name"], keep="last").reset_index(drop=True)
+
+        # Build integer → name map from first results (N1 cells only — only N1 can sleep)
+        if not cell_name_map and len(sim_cell) > 0:
+            n1_names = sorted(
+                sim_cell.loc[sim_cell["Viavi.Cell.Name"].str.contains("/N1/"), "Viavi.Cell.Name"].unique()
             )
-        return "\n".join(lines), kpis
+            cell_name_map.update({idx: name for idx, name in enumerate(n1_names)})
 
-    def sim_test_fn(actions):  return _run(0, actions)
-    def sim_apply_fn(actions): return _run(1, actions)
+        kpis = _compute_kpis(sim_ue, sim_cell)
+
+        # Persist state only for the apply simulation
+        if update_state:
+            for a in (actions or []):
+                cell_name = cell_name_map.get(a["cell_id"], str(a["cell_id"]))
+                cell_sleep_state[cell_name] = (a["action"] == "sleep")
+
+        return _kpi_to_text_viavi(kpis), kpis
+
+    def sim_test_fn(actions):  return _run(actions, update_state=False)
+    def sim_apply_fn(actions): return _run(actions, update_state=True)
 
     return sim_test_fn, sim_apply_fn
 
 
-# ── Output logging ────────────────────────────────────────────────────────────
+# ── KPI formatting ────────────────────────────────────────────────────────────
+
+def _kpi_to_text_viavi(kpis: dict) -> str:
+    """Format VIAVI KPI dict (from _compute_kpis) as a prompt-ready string."""
+    lines = [f"avg_throughput={kpis['avg_throughput_mbps']:.2f} Mbps  "
+             f"sleeping={kpis['sleeping_cells']}/{kpis['total_cells']}"]
+    for site, s in sorted(kpis.get("per_site", {}).items()):
+        state = "Sleeping" if s["n1_sleeping"] else "Awake"
+        lines.append(
+            f"  {site}: N1_PRB={s['n1_prb']:.1f}%  N12_PRB={s['n12_prb']:.1f}%  "
+            f"QoS={s['avg_qos']:.2f} Mbps  [{state}]"
+        )
+    return "\n".join(lines)
+
 
 def _kpi_to_text(kpis: dict) -> str:
+    """Format KPI dict for the Planner prompt — works for both VIAVI and simple dicts."""
+    if "per_site" in kpis:
+        return _kpi_to_text_viavi(kpis)
     lines = []
     for cid, k in kpis.items():
         lines.append(
@@ -99,6 +232,35 @@ def _kpi_to_text(kpis: dict) -> str:
             f"util={k.get('utilization_pct','?')}%  sleep={k.get('sleep_state','?')}"
         )
     return "\n".join(lines)
+
+
+def get_current_kpis(scenario) -> dict:
+    """
+    Run a short no-action simulation to read the current network state.
+    Used at the start of each iteration to give the Planner fresh KPIs.
+    """
+    profile = _get_profile(pd.Timestamp.now())
+
+    orig = []
+    for grp in scenario.config["UE_Configuration"]["UE_Groups"]:
+        orig.append([d["ues"] for d in grp.get("distribution", [])])
+    for g, grp in enumerate(scenario.config["UE_Configuration"]["UE_Groups"]):
+        for d, dist in enumerate(grp.get("distribution", [])):
+            dist["ues"] = max(1, int(orig[g][d] * profile["ue_ratio"]))
+        for svc in grp.get("serviceConfig", []):
+            svc["targetTput_Mbps"] = DEFAULT_THROUGHPUT_MBPS
+
+    scenario.config["System"]["batch_mode"] = True
+    scenario.config["System"]["duration"]   = SIM_DURATION
+
+    sim = scenario.simulation(force_start=True, adk_pace=True)
+    sim.start()
+    sim.run_for(f"{SIM_DURATION}s")
+    sim_ue   = sim.query("UEReports",   start=SIM_DURATION - 1, stop=SIM_DURATION)
+    sim_cell = sim.query("CellReports", start=SIM_DURATION - 1, stop=SIM_DURATION)
+    sim.finish()
+    sim_cell = sim_cell.drop_duplicates(subset=["Viavi.Cell.Name"], keep="last").reset_index(drop=True)
+    return _compute_kpis(sim_ue, sim_cell)
 
 
 def make_run_dir(condition_name: str, model_name: str) -> Path:
