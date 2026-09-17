@@ -1,3 +1,7 @@
+# VIAVI AI RSG SDK (proprietary — not on PyPI)
+# Install separately: pip install viavi_rsg-*.whl
+# viavi-rsg
+
 numpy>=1.26
 pandas>=2.0
 python-dotenv>=1.0
