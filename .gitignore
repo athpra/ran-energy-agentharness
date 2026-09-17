@@ -30,6 +30,11 @@ data/synthetic/
 # Experiment outputs
 output/
 
+# Analysis outputs (regenerate by running the notebook)
+analysis/fig_*.pdf
+analysis/table_summary.csv
+analysis/results_executed.ipynb
+
 # Paper build artifacts
 paper/*.aux
 paper/*.log
