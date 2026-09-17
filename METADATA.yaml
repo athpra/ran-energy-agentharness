@@ -1,0 +1,52 @@
+# Cloudera Blueprint catalog metadata
+
+# --- Identity ---
+name: "Multi-Tool Agent Harness for 5G RAN Energy Optimization"
+slug: "ran-energy-agentharness"
+description: "Tool-augmented dual-LLM closed loop for intent-based 5G RAN energy optimization, with ablation study comparing rule-based, open-loop, digital-twin, and full harness conditions."
+reprise_link: ""
+
+# --- Classification ---
+catalog_classification:
+  - Research
+launchable: false
+lifecycle_status: Active
+
+# --- Industry & alignment ---
+industry: Telecom
+industry_alignment: "Vertical"
+target_vertical: "5G RAN Energy Optimization"
+
+# --- Tags ---
+tags:
+  - ran
+  - energy-optimization
+  - agentic-ai
+  - 5g
+  - network-automation
+  - digital-twin
+  - tool-augmented-agents
+  - ablation-study
+
+# --- Relationships ---
+product_mapping:
+  - Cloudera AI Inference Service
+  - Cloudera Machine Learning
+model_dependencies:
+  - Qwen/Qwen2.5-7B-Instruct
+  - nvidia/nemotron-3-super-120b-a12b
+
+# --- Provenance ---
+publisher: cloudera
+source: Internal
+
+# --- Repository & assets ---
+public_github_link: "https://github.com/athpra/ran-energy-agentharness"
+
+# --- Ownership ---
+maintainer_name: "Athul Prasad"
+
+# --- Dates ---
+date_created: "2026-09-17"
+date_updated: "2026-09-17"
+published_date: "2026-09-17"
