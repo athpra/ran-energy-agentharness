@@ -1,0 +1,85 @@
+"""
+Baseline C — Digital twin only (equivalent to the existing PoC).
+
+Dual-LLM closed loop (Planner + Validator) with VIAVI AI RSG as the
+only tool. No additional tool context (no historical KPI, forecasts,
+faults, interference, energy pricing).
+
+Run:
+    python experiments/baseline_digital_twin.py --intent "5 Mbps" --iterations 20
+"""
+from __future__ import annotations
+
+import argparse
+
+import pandas as pd
+
+from agent.harness   import AgentHarness
+from agent.context   import ALL_TOOLS
+from experiments.common import get_llm, make_run_dir, save_results, make_sim_fns, _kpi_to_text
+
+
+def run(
+    scenario,
+    operator_intent: str,
+    n_iterations: int,
+    condition_name: str = "baseline_digital_twin",
+) -> list[dict]:
+    llm                       = get_llm()
+    sim_test_fn, sim_apply_fn = make_sim_fns(scenario)
+
+    harness = AgentHarness(
+        llm=llm,
+        sim_test_fn=sim_test_fn,
+        sim_apply_fn=sim_apply_fn,
+        operator_intent=operator_intent,
+        enabled_tools=frozenset(),          # no additional tools
+    )
+
+    ts = pd.Timestamp.now()
+    for i in range(n_iterations):
+        kpis          = scenario.simulators[0].get_kpis()
+        cell_ids      = list(kpis.keys())
+        utilization   = {cid: kpis[cid].get("utilization_pct", 0) for cid in cell_ids}
+        kpi_summary   = _kpi_to_text(kpis)
+
+        result = harness.run_iteration(
+            iteration=i + 1,
+            timestamp=ts + pd.Timedelta(minutes=15 * i),
+            kpi_summary=kpi_summary,
+            cell_ids=cell_ids,
+            current_utilization=utilization,
+        )
+        print(
+            f"  [iter {i+1:>3}] proposed={len(result.proposed_actions)}  "
+            f"approved={len(result.approved_actions)}  "
+            f"rejected={len(result.rejected_actions)}"
+        )
+
+    summary = harness.summary()
+    for r in summary:
+        r["condition"] = condition_name
+    return summary
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Baseline C: digital twin only")
+    parser.add_argument("--intent",     default="5 Mbps")
+    parser.add_argument("--iterations", type=int, default=20)
+    parser.add_argument("--rsg-host",   default="")
+    args = parser.parse_args()
+
+    from viavi.rsg import Scenario
+    from pathlib import Path as P
+    scenario_conf = str(P(__file__).parent.parent / "ai_rsg_config" / "config.conf")
+    rsg_address   = f"http://{args.rsg_host}:8000" if args.rsg_host else None
+    scenario      = Scenario(scenario_conf, rsg_address)
+
+    print(f"Running: baseline_digital_twin  intent='{args.intent}'  iterations={args.iterations}")
+    results = run(scenario, args.intent, args.iterations)
+    run_dir = make_run_dir("baseline_digital_twin", "llm")
+    save_results(run_dir, results)
+
+
+if __name__ == "__main__":
+    main()

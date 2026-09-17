@@ -1,0 +1,104 @@
+"""
+Proposed system — Full agent harness.
+
+Dual-LLM closed loop (Planner + Validator) with VIAVI AI RSG +
+all five additional tools active:
+  - historical_kpi
+  - traffic_forecast
+  - alarm_fault
+  - interference
+  - energy_pricing
+
+Pass --tools to run a subset for ablation experiments:
+    python experiments/full_harness.py --tools historical_kpi traffic_forecast
+
+Run:
+    python experiments/full_harness.py --intent "5 Mbps" --iterations 20
+"""
+from __future__ import annotations
+
+import argparse
+
+import pandas as pd
+
+from agent.harness   import AgentHarness
+from agent.context   import ALL_TOOLS
+from experiments.common import (
+    get_llm, make_run_dir, save_results, make_sim_fns, _kpi_to_text
+)
+
+
+def run(
+    scenario,
+    operator_intent: str,
+    n_iterations: int,
+    enabled_tools: frozenset[str] = ALL_TOOLS,
+    condition_name: str = "full_harness",
+) -> list[dict]:
+    llm                       = get_llm()
+    sim_test_fn, sim_apply_fn = make_sim_fns(scenario)
+
+    harness = AgentHarness(
+        llm=llm,
+        sim_test_fn=sim_test_fn,
+        sim_apply_fn=sim_apply_fn,
+        operator_intent=operator_intent,
+        enabled_tools=enabled_tools,
+    )
+
+    ts = pd.Timestamp.now()
+    for i in range(n_iterations):
+        kpis        = scenario.simulators[0].get_kpis()
+        cell_ids    = list(kpis.keys())
+        utilization = {cid: kpis[cid].get("utilization_pct", 0) for cid in cell_ids}
+        kpi_summary = _kpi_to_text(kpis)
+
+        result = harness.run_iteration(
+            iteration=i + 1,
+            timestamp=ts + pd.Timedelta(minutes=15 * i),
+            kpi_summary=kpi_summary,
+            cell_ids=cell_ids,
+            current_utilization=utilization,
+        )
+        print(
+            f"  [iter {i+1:>3}] proposed={len(result.proposed_actions)}  "
+            f"approved={len(result.approved_actions)}  "
+            f"rejected={len(result.rejected_actions)}  "
+            f"tools={sorted(result.tools_used)}"
+        )
+
+    summary = harness.summary()
+    for r in summary:
+        r["condition"] = condition_name
+    return summary
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Full agent harness with all tools")
+    parser.add_argument("--intent",     default="5 Mbps")
+    parser.add_argument("--iterations", type=int, default=20)
+    parser.add_argument("--rsg-host",   default="")
+    parser.add_argument(
+        "--tools", nargs="*", default=list(ALL_TOOLS),
+        choices=list(ALL_TOOLS),
+        help="Subset of tools to enable (default: all). Use for ablation runs.",
+    )
+    args = parser.parse_args()
+
+    enabled = frozenset(args.tools)
+    label   = "full_harness" if enabled == ALL_TOOLS else "ablation_" + "_".join(sorted(enabled))
+
+    from viavi.rsg import Scenario
+    from pathlib import Path as P
+    scenario_conf = str(P(__file__).parent.parent / "ai_rsg_config" / "config.conf")
+    rsg_address   = f"http://{args.rsg_host}:8000" if args.rsg_host else None
+    scenario      = Scenario(scenario_conf, rsg_address)
+
+    print(f"Running: {label}  tools={sorted(enabled)}  intent='{args.intent}'  iterations={args.iterations}")
+    results = run(scenario, args.intent, args.iterations, enabled, label)
+    run_dir = make_run_dir(label, "llm")
+    save_results(run_dir, results)
+
+
+if __name__ == "__main__":
+    main()
