@@ -1,6 +1,5 @@
-# VIAVI AI RSG SDK (proprietary — not on PyPI)
-# Install separately: pip install viavi_rsg-*.whl
-# viavi-rsg
+# VIAVI ADK is served by the RSG server itself — installed via cdsw-build.sh:
+#   pip install http://<rsg-host>:8000/adk
 
 numpy>=1.26
 pandas>=2.0
