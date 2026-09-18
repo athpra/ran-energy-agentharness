@@ -254,6 +254,13 @@ def make_sim_fns(scenario):
     def sim_test_fn(actions):  return _run(actions, update_state=False)
     def sim_apply_fn(actions): return _run(actions, update_state=True)
 
+    # Warm-up: run one no-action sim so cell_name_map is populated before
+    # the first real call, which would otherwise use invalid integer-as-string
+    # cell names and silently apply no sleep commands.
+    print("Initialising cell name map...")
+    _run([], update_state=False)
+    print(f"Cell map ready: {len(cell_name_map)} N1 cells found.")
+
     return sim_test_fn, sim_apply_fn
 
 
