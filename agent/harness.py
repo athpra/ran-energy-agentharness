@@ -118,6 +118,19 @@ class AgentHarness:
             sleep_candidates=tool_ctx.get("sleep_candidates"),
         )
 
+        # Fallback: if the LLM proposes nothing but tool pre-analysis identified
+        # sleep candidates, use those directly.  This applies only when all five
+        # tools are enabled (full_harness condition); the other conditions have no
+        # sleep_candidates in tool_ctx.
+        if not proposed and tool_ctx.get("sleep_candidates"):
+            candidates = tool_ctx["sleep_candidates"]
+            proposed = [
+                {"action": "sleep", "cell_id": cid,
+                 "reason": "tool analysis: low PRB, no active faults, safe interference"}
+                for cid in candidates
+            ]
+            planner_raw = f"[tool-fallback] LLM returned []; using {len(proposed)} tool-derived candidates: {candidates}"
+
         # Step 3 — simulate proposed actions (Sim 1)
         if proposed:
             sim1_summary, _ = self.sim_test_fn(proposed)
