@@ -10,6 +10,12 @@ import os
 import subprocess
 import sys
 
+# Install dependencies before importing project modules
+subprocess.run(
+    [sys.executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"],
+    check=True,
+)
+
 ITER   = os.environ.get("ITER",   "96")
 INTENT = os.environ.get("INTENT", "5 Mbps")
 
