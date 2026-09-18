@@ -153,7 +153,8 @@ def _compute_kpis(sim_ue: pd.DataFrame, sim_cell: pd.DataFrame) -> dict:
 
     for s in per_site.values():
         if "_qos" in s:
-            s["avg_qos"] = sum(s.pop("_qos")) / len(s["_qos"])
+            qos = s.pop("_qos")
+            s["avg_qos"] = sum(qos) / len(qos)
 
     sleeping = sum(1 for s in per_site.values() if s["n1_sleeping"])
     return {
