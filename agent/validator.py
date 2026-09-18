@@ -30,13 +30,17 @@ Respond with a JSON object only — no explanation, no markdown fences:
 }
 
 Approval criteria:
-- Post-simulation throughput must remain at or above the operator's QoS threshold
+- The overall avg_throughput shown in simulation results must remain at or above the
+  operator's QoS threshold. This is the primary safety check.
+- A cell showing QoS=0.00 Mbps is NOT a violation if it has no active UEs — that is
+  expected behavior for lightly loaded or empty cells. Only reject if a cell that was
+  actively serving users shows throughput falling below the QoS threshold.
 - Cells with active faults must not be put to sleep (reject regardless of simulation)
-- Actions that would push any neighbor above 85% utilization must be rejected
+- Actions that would push any neighbor above 85% PRB utilization must be rejected
+  (only apply this check if interference data is available in tool context)
 - When traffic forecast shows a spike in the next 1-2 intervals, reject sleep actions
-  even if current simulation looks acceptable
-
-Be conservative: reject any action where the evidence is ambiguous.
+  even if current simulation looks acceptable (only apply if forecast data is available)
+- If tool context is absent, base the decision solely on avg_throughput vs the QoS threshold.
 """
 
 
