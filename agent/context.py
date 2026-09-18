@@ -144,11 +144,11 @@ def assemble(
         blocked |= interference_blocked
 
         sleep_candidates = sorted(cid for cid in cell_ids if cid not in blocked)
+        ctx["sleep_candidates"] = sleep_candidates
 
         lines.append("### Pre-computed Action Guidance")
         lines.append(f"Blocked cells (faults/forecast/interference): {sorted(blocked)}")
         lines.append(f"SLEEP these cells (Awake, N1_PRB low, all signals clear): {sleep_candidates}")
-        lines.append("Output a sleep action for every cell in the SLEEP list above that is currently Awake.")
         lines.append("")
 
     return ctx, "\n".join(lines)

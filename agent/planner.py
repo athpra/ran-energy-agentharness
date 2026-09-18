@@ -64,14 +64,32 @@ def plan(
     operator_intent: str,
     tool_context_block: str,
     llm: ChatOpenAI,
+    sleep_candidates: list[int] | None = None,
 ) -> tuple[list[dict], str, float]:
     """
     Returns (actions, raw_response, elapsed_seconds).
     """
+    # If tool analysis pre-computed sleep candidates, add them as a final
+    # directive immediately before the response request so the model sees
+    # them as the most recent instruction.
+    if sleep_candidates:
+        example = json.dumps(
+            [{"action": "sleep", "cell_id": cid, "reason": "low N1_PRB, tool signals clear"}
+             for cid in sleep_candidates[:2]]
+        )
+        candidates_directive = (
+            f"\n### Final Instruction\n"
+            f"Tool analysis has determined the following cells are safe to sleep: {sleep_candidates}\n"
+            f"Output a sleep action for each of these cell_ids. Example format: {example}, ...\n"
+        )
+    else:
+        candidates_directive = ""
+
     user_message = (
         f"{tool_context_block}\n\n"
         f"### Current Network KPIs\n{kpi_summary}\n\n"
-        f"### Operator Intent\n{operator_intent}\n\n"
+        f"### Operator Intent\n{operator_intent}\n"
+        f"{candidates_directive}\n"
         f"Respond with a JSON array of sleep/wake actions."
     )
 

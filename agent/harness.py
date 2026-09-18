@@ -115,6 +115,7 @@ class AgentHarness:
             operator_intent=self.operator_intent,
             tool_context_block=tool_block,
             llm=self.llm,
+            sleep_candidates=tool_ctx.get("sleep_candidates"),
         )
 
         # Step 3 — simulate proposed actions (Sim 1)
