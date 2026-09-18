@@ -41,6 +41,8 @@ def assemble(
     """
     ctx: dict[str, Any] = {"tools_used": list(enabled_tools)}
     lines: list[str]    = ["### Tool Context\n"]
+    if not enabled_tools:
+        lines.append("(no additional tool context — act on current KPIs alone)\n")
 
     if "historical_kpi" in enabled_tools:
         data = historical_kpi_query(cell_id=None)
