@@ -17,6 +17,7 @@ import pandas as pd
 
 from agent.harness   import AgentHarness
 from agent.context   import ALL_TOOLS
+from agent.planner   import BLUEPRINT_SYSTEM_PROMPT
 from experiments.common import get_llm, get_current_kpis, connect_scenario, make_run_dir, save_results, make_sim_fns, _kpi_to_text
 
 
@@ -35,11 +36,13 @@ def run(
         sim_apply_fn=sim_apply_fn,
         operator_intent=operator_intent,
         enabled_tools=frozenset(),          # no additional tools
+        planner_system_prompt=BLUEPRINT_SYSTEM_PROMPT,
     )
 
-    ts = pd.Timestamp.now()
+    ts = pd.Timestamp.now().normalize()  # start of today; iterations advance virtually
     for i in range(n_iterations):
-        kpis        = get_current_kpis(scenario)
+        virtual_ts  = ts + pd.Timedelta(minutes=15 * i)
+        kpis        = get_current_kpis(scenario, timestamp=virtual_ts)
         site_keys   = sorted(kpis["per_site"].keys())
         cell_ids    = list(range(len(site_keys)))
         utilization = {j: kpis["per_site"][k]["n1_prb"] for j, k in enumerate(site_keys)}
@@ -47,7 +50,7 @@ def run(
 
         result = harness.run_iteration(
             iteration=i + 1,
-            timestamp=ts + pd.Timedelta(minutes=15 * i),
+            timestamp=virtual_ts,
             kpi_summary=kpi_summary,
             cell_ids=cell_ids,
             current_utilization=utilization,

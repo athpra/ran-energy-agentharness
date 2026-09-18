@@ -16,6 +16,8 @@ import os
 import time
 from pathlib import Path
 
+import pandas as pd
+
 from experiments.common import get_current_kpis, make_run_dir, save_results
 
 
@@ -46,10 +48,13 @@ def run(
     from experiments.common import make_sim_fns
     _, sim_apply_fn = make_sim_fns(scenario)
 
+    ts = pd.Timestamp.now().normalize()  # start of today; iterations advance virtually
+
     results = []
     for i in range(n_iterations):
-        t0      = time.time()
-        raw     = get_current_kpis(scenario)
+        t0         = time.time()
+        virtual_ts = ts + pd.Timedelta(minutes=15 * i)
+        raw        = get_current_kpis(scenario, timestamp=virtual_ts)
         sk      = sorted(raw["per_site"].keys())
         cell_kpis = {
             j: {

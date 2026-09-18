@@ -83,12 +83,14 @@ class AgentHarness:
         sim_apply_fn: SimFn,
         operator_intent: str,
         enabled_tools: frozenset[str] = ALL_TOOLS,
+        planner_system_prompt: str | None = None,
     ):
-        self.llm             = llm
-        self.sim_test_fn     = sim_test_fn
-        self.sim_apply_fn    = sim_apply_fn
-        self.operator_intent = operator_intent
-        self.enabled_tools   = enabled_tools
+        self.llm                    = llm
+        self.sim_test_fn            = sim_test_fn
+        self.sim_apply_fn           = sim_apply_fn
+        self.operator_intent        = operator_intent
+        self.enabled_tools          = enabled_tools
+        self.planner_system_prompt  = planner_system_prompt
         self.history: list[IterationResult] = []
 
     def run_iteration(
@@ -116,6 +118,7 @@ class AgentHarness:
             tool_context_block=tool_block,
             llm=self.llm,
             sleep_candidates=tool_ctx.get("sleep_candidates"),
+            system_prompt=self.planner_system_prompt,
         )
 
         # Fallback: if the LLM proposes nothing but tool pre-analysis identified

@@ -324,12 +324,16 @@ def _kpi_to_text(kpis: dict) -> str:
     return "\n".join(lines)
 
 
-def get_current_kpis(scenario) -> dict:
+def get_current_kpis(scenario, timestamp: pd.Timestamp | None = None) -> dict:
     """
     Run a short no-action simulation to read the current network state.
     Used at the start of each iteration to give the Planner fresh KPIs.
+
+    Pass `timestamp` (the virtual iteration time) so traffic profiles advance
+    through a 24-hour cycle across iterations rather than staying fixed at the
+    current wall-clock time.  Falls back to now() when omitted.
     """
-    profile = _get_profile(pd.Timestamp.now())
+    profile = _get_profile(timestamp if timestamp is not None else pd.Timestamp.now())
 
     orig = []
     for grp in scenario.config["UE_Configuration"]["UE_Groups"]:

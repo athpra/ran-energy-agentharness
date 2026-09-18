@@ -45,6 +45,27 @@ STEP 4 — Apply forecast filter (only if forecast data is present):
 STEP 5 — Output the remaining actions as a JSON array. If empty, output [].
 """
 
+# Blueprint-equivalent prompt: mirrors the PRB thresholds from the blueprint
+# notebook's SQL decision rules. Used for baseline_digital_twin and
+# baseline_openloop so they replicate the existing PoC's decision logic.
+BLUEPRINT_SYSTEM_PROMPT = """\
+You are a 5G RAN energy optimization controller.
+Your job is to output sleep/wake actions for N1 cells.
+
+Respond with a JSON array of actions only — no explanation, no markdown fences.
+Each action: {"action": "sleep"|"wake", "cell_id": <int>, "reason": "<short reason>"}
+If no actions are needed, output [].
+
+For each cell listed in "Current Network KPIs", apply these rules IN ORDER and stop at the first match:
+
+  RULE WAKE:    cell is [Sleeping] AND N12_PRB > 60  → add wake action
+  RULE SLEEP_1: cell is [Awake]    AND N1_PRB = 0 AND N12_PRB = 0  → add sleep action (no traffic on any band)
+  RULE SLEEP_2: cell is [Awake]    AND N1_PRB < 12               → add sleep action (N1 band idle, QoS protected by N12)
+  RULE NONE:    otherwise → no action for this cell
+
+Apply every rule to every cell. Output one JSON action per matching cell.
+"""
+
 
 def _parse_actions(text: str) -> list[dict]:
     """Extract a JSON array from the LLM response, tolerating minor formatting."""
@@ -65,6 +86,7 @@ def plan(
     tool_context_block: str,
     llm: ChatOpenAI,
     sleep_candidates: list[int] | None = None,
+    system_prompt: str | None = None,
 ) -> tuple[list[dict], str, float]:
     """
     Returns (actions, raw_response, elapsed_seconds).
@@ -93,9 +115,11 @@ def plan(
         f"Respond with a JSON array of sleep/wake actions."
     )
 
+    active_system_prompt = system_prompt if system_prompt is not None else SYSTEM_PROMPT
+
     t0       = time.time()
     response = llm.invoke([
-        {"role": "system",  "content": SYSTEM_PROMPT},
+        {"role": "system",  "content": active_system_prompt},
         {"role": "user",    "content": user_message},
     ])
     elapsed  = time.time() - t0

@@ -17,8 +17,10 @@ import argparse
 import os
 import time
 
+import pandas as pd
+
 from experiments.common import get_llm, get_current_kpis, connect_scenario, make_run_dir, save_results, make_sim_fns, _kpi_to_text
-from agent.planner import plan
+from agent.planner import plan, BLUEPRINT_SYSTEM_PROMPT
 
 
 def run(
@@ -30,18 +32,22 @@ def run(
     llm = get_llm()
     _, sim_apply_fn = make_sim_fns(scenario)
 
+    ts = pd.Timestamp.now().normalize()  # start of today; iterations advance virtually
+
     results = []
     for i in range(n_iterations):
-        t0 = time.time()
+        t0         = time.time()
+        virtual_ts = ts + pd.Timedelta(minutes=15 * i)
 
-        kpi_summary = _kpi_to_text(get_current_kpis(scenario))
+        kpi_summary = _kpi_to_text(get_current_kpis(scenario, timestamp=virtual_ts))
 
-        # No tool context — empty block
+        # No tool context — empty block; blueprint-style rules drive decisions
         proposed, planner_raw, t_plan = plan(
             kpi_summary=kpi_summary,
             operator_intent=operator_intent,
             tool_context_block="### Tool Context\n(none — open-loop baseline)\n",
             llm=llm,
+            system_prompt=BLUEPRINT_SYSTEM_PROMPT,
         )
 
         # Apply directly — no Sim 1 test, no validator
