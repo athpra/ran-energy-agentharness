@@ -73,12 +73,15 @@ def assemble(
         data = alarm_fault_query(timestamp=timestamp)
         ctx["alarm_fault"] = data
         active = {cid: v for cid, v in data.items() if v["active"]}
-        lines.append("**Active faults:**")
+        lines.append("**Active faults (DO NOT sleep these cells):**")
         if active:
             for cid, v in active.items():
                 lines.append(f"  Cell {cid}: {v['fault_type']} (severity={v['severity']})")
+            faulty_ids = set(active.keys())
+            candidates = sorted(cid for cid in cell_ids if cid not in faulty_ids)
+            lines.append(f"  Sleep candidates (no active fault): {candidates}")
         else:
-            lines.append("  None")
+            lines.append("  None — all cells are fault-free candidates")
         lines.append("")
 
     if "interference" in enabled_tools:
