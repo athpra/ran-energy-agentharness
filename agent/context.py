@@ -116,4 +116,39 @@ def assemble(
         lines.append(f"  Forecast: {forecast_str}")
         lines.append("")
 
+    # Pre-computed decision summary — collapses all signal reasoning so the
+    # Planner can act without multi-step inference across all tool blocks.
+    if enabled_tools:
+        blocked: set[int] = set()
+
+        # Fault-blocked cells
+        fault_data = ctx.get("alarm_fault", {})
+        fault_blocked = {cid for cid, v in fault_data.items() if v.get("active")}
+        blocked |= fault_blocked
+
+        # Forecast-blocked cells (t+1 > 5 × assumed 5 Mbps = 25 Mbps)
+        forecast_threshold = 25.0
+        forecast_data = ctx.get("traffic_forecast", {})
+        forecast_blocked = set()
+        for cid, steps in forecast_data.items():
+            t1 = next((s["predicted_mbps"] for s in steps if s["step"] == 1), 0)
+            if t1 > forecast_threshold:
+                forecast_blocked.add(int(cid))
+        blocked |= forecast_blocked
+
+        # Interference-blocked cells (OVERLOAD RISK)
+        interference_blocked = {
+            cid for cid, result in ctx.get("interference", {}).items()
+            if not result.get("safe", True)
+        }
+        blocked |= interference_blocked
+
+        sleep_candidates = sorted(cid for cid in cell_ids if cid not in blocked)
+
+        lines.append("### Pre-computed Action Guidance")
+        lines.append(f"Blocked cells (faults/forecast/interference): {sorted(blocked)}")
+        lines.append(f"SLEEP these cells (Awake, N1_PRB low, all signals clear): {sleep_candidates}")
+        lines.append("Output a sleep action for every cell in the SLEEP list above that is currently Awake.")
+        lines.append("")
+
     return ctx, "\n".join(lines)
