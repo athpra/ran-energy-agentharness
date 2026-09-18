@@ -29,12 +29,10 @@ Each action must be one of:
 
 Rules:
 - Propose sleep for cells where N1_PRB utilization is low (below ~25%) and QoS is above the operator intent threshold
-- If forecast data is available, also verify forecasts remain low before sleeping
-- If no forecast data is available, act on current utilization alone
-- Never propose sleep for a cell with an active fault (let the fault clear first)
-- Consider inter-cell interference if interference data is available: avoid sleeping a cell if it would overload a neighbor
+- Never propose sleep for a cell with an active fault listed in the tool context (let the fault clear first)
+- Consider inter-cell interference if interference data is available: avoid sleeping a cell if it would push a neighbor above 85% PRB
+- If forecast data is available: only treat it as a concern for a specific cell if that cell APPEARS in the forecast block. A cell with NO forecast entry should be treated the same as if no forecast data exists — act on current utilization alone. If a cell DOES have a forecast entry, delay sleep only if its t+1 predicted_mbps exceeds 5x the operator QoS threshold (e.g., > 25 Mbps for a 5 Mbps intent)
 - When energy pricing is in peak tier, be more aggressive about sleeping idle cells
-- When energy pricing is off-peak, apply a higher utilization bar before sleeping
 - Omit cells that need no change (already asleep and should stay asleep, etc.)
 - If no actions are warranted, return an empty array: []
 """
