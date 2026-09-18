@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-ITER=${ITER:-20}
+ITER=${ITER:-96}
 INTENT=${INTENT:-"5 Mbps"}
 
 echo "Starting full experiment run: iterations=$ITER  intent='$INTENT'"
