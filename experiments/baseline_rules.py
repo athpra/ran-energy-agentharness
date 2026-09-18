@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 
@@ -88,7 +89,7 @@ def main():
     parser.add_argument("--iterations",   type=int,   default=20)
     parser.add_argument("--sleep-thresh", type=float, default=15.0)
     parser.add_argument("--wake-thresh",  type=float, default=30.0)
-    parser.add_argument("--rsg-host",     default="")
+    parser.add_argument("--rsg-host",     default=os.getenv("RSG_HOST", ""))
     args = parser.parse_args()
 
     from viavi.rsg import Scenario

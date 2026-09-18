@@ -14,6 +14,7 @@ Run:
 from __future__ import annotations
 
 import argparse
+import os
 import time
 
 from experiments.common import get_llm, get_current_kpis, make_run_dir, save_results, make_sim_fns, _kpi_to_text
@@ -73,7 +74,7 @@ def main():
     parser = argparse.ArgumentParser(description="Baseline B: open-loop LLM")
     parser.add_argument("--intent",     default="5 Mbps")
     parser.add_argument("--iterations", type=int, default=20)
-    parser.add_argument("--rsg-host",   default="")
+    parser.add_argument("--rsg-host",   default=os.getenv("RSG_HOST", ""))
     args = parser.parse_args()
 
     from viavi.rsg import Scenario

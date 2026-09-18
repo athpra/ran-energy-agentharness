@@ -11,6 +11,7 @@ Run:
 from __future__ import annotations
 
 import argparse
+import os
 
 import pandas as pd
 
@@ -67,7 +68,7 @@ def main():
     parser = argparse.ArgumentParser(description="Baseline C: digital twin only")
     parser.add_argument("--intent",     default="5 Mbps")
     parser.add_argument("--iterations", type=int, default=20)
-    parser.add_argument("--rsg-host",   default="")
+    parser.add_argument("--rsg-host",   default=os.getenv("RSG_HOST", ""))
     args = parser.parse_args()
 
     from viavi.rsg import Scenario

@@ -18,6 +18,7 @@ Run:
 from __future__ import annotations
 
 import argparse
+import os
 
 import pandas as pd
 
@@ -78,7 +79,7 @@ def main():
     parser = argparse.ArgumentParser(description="Full agent harness with all tools")
     parser.add_argument("--intent",     default="5 Mbps")
     parser.add_argument("--iterations", type=int, default=20)
-    parser.add_argument("--rsg-host",   default="")
+    parser.add_argument("--rsg-host",   default=os.getenv("RSG_HOST", ""))
     parser.add_argument(
         "--tools", nargs="*", default=list(ALL_TOOLS),
         choices=list(ALL_TOOLS),
