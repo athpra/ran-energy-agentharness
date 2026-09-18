@@ -118,8 +118,8 @@ _TRAFFIC_PROFILES = [
 
 DEFAULT_THROUGHPUT_MBPS = 8.0
 SIM_DURATION            = 10   # seconds per simulation run
-SIM_MAX_RETRIES         = 3
-SIM_RETRY_DELAY_S       = 30
+SIM_MAX_RETRIES         = 5
+SIM_RETRY_DELAY_S       = 60
 
 
 def _get_profile(ts: pd.Timestamp) -> dict:
