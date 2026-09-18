@@ -7,13 +7,16 @@ Shared helpers for all experiment runners.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import socket
 import sys
 from pathlib import Path
 from datetime import datetime
 
 import pandas as pd
+import requests
 from dotenv import load_dotenv, find_dotenv
 from langchain_openai import ChatOpenAI
 
@@ -52,6 +55,49 @@ def get_llm() -> ChatOpenAI:
         max_tokens=4096,
         request_timeout=120,
     )
+
+
+# ── VIAVI RSG connection ──────────────────────────────────────────────────────
+
+def connect_scenario(rsg_host: str, scenario_conf: str | None = None):
+    """
+    Connect to VIAVI AI RSG and return a Scenario object.
+
+    Derives a stable client hash from the machine's public IP + username,
+    constructing the proxy URL http://<rsg_host>:8000/c/<hash>/ — the same
+    pattern used in the blueprint PoC notebook.
+    """
+    from viavi.rsg import Scenario
+
+    if scenario_conf is None:
+        scenario_conf = str(PROJECT_ROOT / "ai_rsg_config" / "config.conf")
+
+    # Check for a full URL override (e.g. RSG_ADDRESS env var)
+    rsg_address_override = os.getenv("RSG_ADDRESS", "").strip()
+    if rsg_address_override:
+        print("Using RSG_ADDRESS override:", rsg_address_override)
+        return Scenario(scenario_conf, rsg_address_override)
+
+    if not rsg_host:
+        sys.exit("Error: RSG_HOST is not set. Pass --rsg-host or set the RSG_HOST env var.")
+
+    # Verify TCP reachability
+    try:
+        socket.create_connection((rsg_host, 8000), timeout=5).close()
+    except Exception as ex:
+        sys.exit(f"Error: cannot reach RSG host {rsg_host}:8000 — {ex}")
+
+    # Derive a stable hash from public IP + username (same method as PoC)
+    try:
+        public_ip = requests.get("https://api.ipify.org", timeout=5).text.strip()
+    except Exception:
+        public_ip = "unknownip"
+    user_name = os.getenv("HADOOP_USER_NAME", os.getenv("USER", "cdsw"))
+    h = hashlib.sha256(f"{public_ip}-{user_name}".encode()).hexdigest()[:8]
+    rsg_addr = f"http://{rsg_host}:8000/c/{h}/"
+    print(f"RSG addr: {rsg_addr}")
+
+    return Scenario(scenario_conf, rsg_addr)
 
 
 # ── Traffic profiles (mirrors PoC VTZ model) ──────────────────────────────────

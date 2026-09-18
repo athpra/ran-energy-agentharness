@@ -92,12 +92,8 @@ def main():
     parser.add_argument("--rsg-host",     default=os.getenv("RSG_HOST", ""))
     args = parser.parse_args()
 
-    from viavi.rsg import Scenario
-    from pathlib import Path as P
-    PROJECT_ROOT  = P(__file__).parent.parent
-    scenario_conf = str(PROJECT_ROOT / "ai_rsg_config" / "config.conf")
-    rsg_address   = f"http://{args.rsg_host}:8000" if args.rsg_host else None
-    scenario      = Scenario(scenario_conf, rsg_address)
+    from experiments.common import connect_scenario
+    scenario = connect_scenario(args.rsg_host)
 
     print(f"Running: baseline_rules  intent='{args.intent}'  iterations={args.iterations}")
     results  = run(scenario, args.intent, args.iterations, args.sleep_thresh, args.wake_thresh)

@@ -17,7 +17,7 @@ import pandas as pd
 
 from agent.harness   import AgentHarness
 from agent.context   import ALL_TOOLS
-from experiments.common import get_llm, get_current_kpis, make_run_dir, save_results, make_sim_fns, _kpi_to_text
+from experiments.common import get_llm, get_current_kpis, connect_scenario, make_run_dir, save_results, make_sim_fns, _kpi_to_text
 
 
 def run(
@@ -71,11 +71,7 @@ def main():
     parser.add_argument("--rsg-host",   default=os.getenv("RSG_HOST", ""))
     args = parser.parse_args()
 
-    from viavi.rsg import Scenario
-    from pathlib import Path as P
-    scenario_conf = str(P(__file__).parent.parent / "ai_rsg_config" / "config.conf")
-    rsg_address   = f"http://{args.rsg_host}:8000" if args.rsg_host else None
-    scenario      = Scenario(scenario_conf, rsg_address)
+    scenario = connect_scenario(args.rsg_host)
 
     print(f"Running: baseline_digital_twin  intent='{args.intent}'  iterations={args.iterations}")
     results = run(scenario, args.intent, args.iterations)
