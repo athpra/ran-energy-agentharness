@@ -124,13 +124,17 @@ class AgentHarness:
             sim1_summary = "No actions proposed — simulation skipped."
 
         # Step 4 — validator approves / rejects
-        approved, rejected, validator_raw, t_val = validate(
+        validator_approved, rejected, validator_raw, t_val = validate(
             proposed_actions=proposed,
             sim_result_summary=sim1_summary,
             operator_intent=self.operator_intent,
             tool_context_block=tool_block,
             llm=self.llm,
         )
+        # Veto-only semantics: approved = proposed minus explicitly rejected.
+        # This is robust against the model omitting safe actions from "approved".
+        rejected_ids = {r["cell_id"] for r in rejected}
+        approved = [a for a in proposed if a["cell_id"] not in rejected_ids]
 
         # Step 5 — apply approved actions (Sim 2)
         if approved:

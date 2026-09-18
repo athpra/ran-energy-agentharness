@@ -29,18 +29,29 @@ Respond with a JSON object only — no explanation, no markdown fences:
   "rejected": [{"action": "sleep"|"wake", "cell_id": <int>, "reason": "<why rejected>"}]
 }
 
-Approval criteria:
-- The overall avg_throughput shown in simulation results must remain at or above the
-  operator's QoS threshold. This is the primary safety check.
-- A cell showing QoS=0.00 Mbps is NOT a violation if it has no active UEs — that is
-  expected behavior for lightly loaded or empty cells. Only reject if a cell that was
-  actively serving users shows throughput falling below the QoS threshold.
-- Cells with active faults must not be put to sleep (reject regardless of simulation)
-- Actions that would push any neighbor above 85% PRB utilization must be rejected
-  (only apply this check if interference data is available in tool context)
-- When traffic forecast shows a spike in the next 1-2 intervals, reject sleep actions
-  even if current simulation looks acceptable (only apply if forecast data is available)
-- If tool context is absent, base the decision solely on avg_throughput vs the QoS threshold.
+Approval criteria — read carefully:
+
+PRIMARY CHECK: The first line of the simulation results shows:
+  "avg_throughput=X.XX Mbps  sleeping=Y/Z"
+Read the avg_throughput value. If avg_throughput >= the operator's QoS threshold, the
+simulation is SAFE. In that case, approve ALL proposed actions by listing them all in
+"approved" and leave "rejected" empty.
+
+Only add an action to "rejected" when it causes ONE of these specific, factual violations:
+  1. avg_throughput in the simulation result is NUMERICALLY BELOW the operator threshold
+     (e.g., threshold "5 Mbps" means reject only if avg_throughput < 5.0 — if avg is
+     7.0 Mbps that is ABOVE 5 Mbps and is NOT a violation)
+  2. The tool context lists an active fault on that specific cell (reject only that cell)
+  3. Interference data shows sleeping that cell specifically causes a neighbor to exceed
+     85% PRB (only apply if interference data is present in tool context)
+
+NEVER reject based on:
+- A sleeping cell's per-cell QoS (sleeping cells show QoS=0.00 — that is expected)
+- High N12_PRB% on a cell (even 100% N12 utilization is NOT a rejection reason unless
+  avg_throughput drops below the threshold)
+- Traffic forecast concerns (only if forecast data is present in tool context)
+
+If avg_throughput >= threshold: put ALL proposed actions in "approved", leave "rejected" empty.
 """
 
 
