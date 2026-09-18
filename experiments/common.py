@@ -59,7 +59,7 @@ def get_llm() -> ChatOpenAI:
 
 # ── VIAVI RSG connection ──────────────────────────────────────────────────────
 
-def connect_scenario(rsg_host: str, scenario_conf: str | None = None):
+def connect_scenario(rsg_host: str = "", scenario_conf: str | None = None):
     """
     Connect to VIAVI AI RSG and return a Scenario object.
 
@@ -67,6 +67,10 @@ def connect_scenario(rsg_host: str, scenario_conf: str | None = None):
     constructing the proxy URL http://<rsg_host>:8000/c/<hash>/ — the same
     pattern used in the blueprint PoC notebook.
     """
+    load_dotenv(find_dotenv(), override=True)
+    if not rsg_host:
+        rsg_host = os.getenv("RSG_HOST", "").strip()
+
     from viavi.rsg import Scenario
 
     if scenario_conf is None:
