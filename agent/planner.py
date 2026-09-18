@@ -28,9 +28,11 @@ Each action must be one of:
   {"action": "wake",  "cell_id": <int>, "reason": "<short reason>"}
 
 Rules:
-- Only propose sleep for cells where current utilization is low AND forecasts remain low
+- Propose sleep for cells where N1_PRB utilization is low (below ~25%) and QoS is above the operator intent threshold
+- If forecast data is available, also verify forecasts remain low before sleeping
+- If no forecast data is available, act on current utilization alone
 - Never propose sleep for a cell with an active fault (let the fault clear first)
-- Consider inter-cell interference: avoid sleeping a cell if it would overload a neighbor
+- Consider inter-cell interference if interference data is available: avoid sleeping a cell if it would overload a neighbor
 - When energy pricing is in peak tier, be more aggressive about sleeping idle cells
 - When energy pricing is off-peak, apply a higher utilization bar before sleeping
 - Omit cells that need no change (already asleep and should stay asleep, etc.)
