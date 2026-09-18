@@ -242,10 +242,19 @@ def make_sim_fns(scenario):
 
             except (RuntimeError, Exception) as exc:
                 last_exc = exc
+                # 429 quota exceeded — wait for the cooldown the server reports
+                wait_s = SIM_RETRY_DELAY_S
+                cause = exc.__cause__ or exc
+                if hasattr(cause, "response") and getattr(cause.response, "status_code", None) == 429:
+                    try:
+                        cooldown = cause.response.json().get("cooldown_remaining_seconds", 1800)
+                        wait_s = int(cooldown) + 60  # add 1 min buffer
+                    except Exception:
+                        wait_s = 1860
                 if attempt < SIM_MAX_RETRIES - 1:
                     print(f"  RSG error (attempt {attempt + 1}/{SIM_MAX_RETRIES}): {exc}. "
-                          f"Retrying in {SIM_RETRY_DELAY_S}s...")
-                    _time.sleep(SIM_RETRY_DELAY_S)
+                          f"Retrying in {wait_s}s...")
+                    _time.sleep(wait_s)
                 else:
                     raise RuntimeError(
                         f"RSG simulation failed after {SIM_MAX_RETRIES} attempts"
@@ -347,10 +356,18 @@ def get_current_kpis(scenario) -> dict:
             break
         except Exception as exc:
             last_exc = exc
+            wait_s = SIM_RETRY_DELAY_S
+            cause = exc.__cause__ or exc
+            if hasattr(cause, "response") and getattr(cause.response, "status_code", None) == 429:
+                try:
+                    cooldown = cause.response.json().get("cooldown_remaining_seconds", 1800)
+                    wait_s = int(cooldown) + 60
+                except Exception:
+                    wait_s = 1860
             if attempt < SIM_MAX_RETRIES - 1:
                 print(f"  RSG error in get_current_kpis (attempt {attempt + 1}/{SIM_MAX_RETRIES}): {exc}. "
-                      f"Retrying in {SIM_RETRY_DELAY_S}s...")
-                _time.sleep(SIM_RETRY_DELAY_S)
+                      f"Retrying in {wait_s}s...")
+                _time.sleep(wait_s)
             else:
                 raise RuntimeError(
                     f"get_current_kpis failed after {SIM_MAX_RETRIES} attempts"
@@ -365,6 +382,12 @@ def make_run_dir(condition_name: str, model_name: str) -> Path:
     run_dir = OUTPUT_DIR / f"run_{ts}_{condition_name}_{model_name.replace('/', '_')}"
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
+
+
+def append_result(run_dir: Path, result: dict) -> None:
+    """Append a single iteration result to iterations.jsonl (creates file if needed)."""
+    with open(run_dir / "iterations.jsonl", "a") as f:
+        f.write(json.dumps(result) + "\n")
 
 
 def save_results(run_dir: Path, results: list[dict]) -> None:

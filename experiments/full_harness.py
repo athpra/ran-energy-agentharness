@@ -25,7 +25,7 @@ import pandas as pd
 from agent.harness   import AgentHarness
 from agent.context   import ALL_TOOLS
 from experiments.common import (
-    get_llm, get_current_kpis, connect_scenario, make_run_dir, save_results, make_sim_fns, _kpi_to_text
+    get_llm, get_current_kpis, connect_scenario, make_run_dir, save_results, append_result, make_sim_fns, _kpi_to_text
 )
 
 
@@ -35,6 +35,7 @@ def run(
     n_iterations: int,
     enabled_tools: frozenset[str] = ALL_TOOLS,
     condition_name: str = "full_harness",
+    run_dir=None,
 ) -> list[dict]:
     llm                       = get_llm()
     sim_test_fn, sim_apply_fn = make_sim_fns(scenario)
@@ -62,12 +63,16 @@ def run(
             cell_ids=cell_ids,
             current_utilization=utilization,
         )
+        r_dict = result.to_dict()
+        r_dict["condition"] = condition_name
         print(
             f"  [iter {i+1:>3}] proposed={len(result.proposed_actions)}  "
             f"approved={len(result.approved_actions)}  "
             f"rejected={len(result.rejected_actions)}  "
             f"tools={sorted(result.tools_used)}"
         )
+        if run_dir is not None:
+            append_result(run_dir, r_dict)
 
     summary = harness.summary()
     for r in summary:
@@ -92,9 +97,10 @@ def main():
 
     scenario = connect_scenario(args.rsg_host)
 
-    print(f"Running: {label}  tools={sorted(enabled)}  intent='{args.intent}'  iterations={args.iterations}")
-    results = run(scenario, args.intent, args.iterations, enabled, label)
     run_dir = make_run_dir(label, "llm")
+    print(f"Running: {label}  tools={sorted(enabled)}  intent='{args.intent}'  iterations={args.iterations}")
+    print(f"Saving incrementally to: {run_dir}")
+    results = run(scenario, args.intent, args.iterations, enabled, label, run_dir=run_dir)
     save_results(run_dir, results)
 
 
