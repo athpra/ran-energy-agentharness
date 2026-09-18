@@ -39,7 +39,8 @@ def run(
         t0         = time.time()
         virtual_ts = ts + pd.Timedelta(minutes=15 * i)
 
-        kpi_summary = _kpi_to_text(get_current_kpis(scenario, timestamp=virtual_ts))
+        raw_kpis    = get_current_kpis(scenario, timestamp=virtual_ts)
+        kpi_summary = _kpi_to_text(raw_kpis)
 
         # No tool context — empty block; blueprint-style rules drive decisions
         proposed, planner_raw, t_plan = plan(
@@ -49,6 +50,20 @@ def run(
             llm=llm,
             system_prompt=BLUEPRINT_SYSTEM_PROMPT,
         )
+
+        # Fallback: if LLM returns nothing, derive actions from blueprint PRB rules
+        # directly (N1_PRB < 12 → sleep) so the condition produces real data.
+        if not proposed:
+            site_keys = sorted(raw_kpis["per_site"].keys())
+            proposed = [
+                {"action": "sleep", "cell_id": j,
+                 "reason": f"N1_PRB={raw_kpis['per_site'][k]['n1_prb']:.1f}% < 12% [prb-fallback]"}
+                for j, k in enumerate(site_keys)
+                if not raw_kpis["per_site"][k]["n1_sleeping"]
+                and raw_kpis["per_site"][k]["n1_prb"] < 12.0
+            ]
+            if proposed:
+                planner_raw = f"[prb-fallback] LLM returned []; generated {len(proposed)} actions from PRB rules"
 
         # Apply directly — no Sim 1 test, no validator
         sim_summary, post_kpis = sim_apply_fn(proposed) if proposed else (

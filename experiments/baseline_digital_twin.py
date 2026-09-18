@@ -48,12 +48,20 @@ def run(
         utilization = {j: kpis["per_site"][k]["n1_prb"] for j, k in enumerate(site_keys)}
         kpi_summary = _kpi_to_text(kpis)
 
+        # Blueprint PRB rule: N1_PRB < 12 → sleep candidate (mirrors blueprint SQL).
+        # Passed as static fallback in case the LLM planner returns [].
+        sleep_cands = [
+            j for j, k in enumerate(site_keys)
+            if not kpis["per_site"][k]["n1_sleeping"] and kpis["per_site"][k]["n1_prb"] < 12.0
+        ]
+
         result = harness.run_iteration(
             iteration=i + 1,
             timestamp=virtual_ts,
             kpi_summary=kpi_summary,
             cell_ids=cell_ids,
             current_utilization=utilization,
+            static_sleep_candidates=sleep_cands or None,
         )
         print(
             f"  [iter {i+1:>3}] proposed={len(result.proposed_actions)}  "

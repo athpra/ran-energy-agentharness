@@ -50,20 +50,23 @@ STEP 5 — Output the remaining actions as a JSON array. If empty, output [].
 # baseline_openloop so they replicate the existing PoC's decision logic.
 BLUEPRINT_SYSTEM_PROMPT = """\
 You are a 5G RAN energy optimization controller.
-Your job is to output sleep/wake actions for N1 cells.
+Your ONLY output is a JSON array of sleep/wake actions. No explanation, no markdown, nothing else.
 
-Respond with a JSON array of actions only — no explanation, no markdown fences.
-Each action: {"action": "sleep"|"wake", "cell_id": <int>, "reason": "<short reason>"}
-If no actions are needed, output [].
+DECISION RULES — apply to every cell line in ### Current Network KPIs:
+  • [Awake]   cell with N1_PRB value < 12  → sleep action
+  • [Sleeping] cell with N12_PRB value > 60 → wake action
+  • Otherwise → skip that cell
 
-For each cell listed in "Current Network KPIs", apply these rules IN ORDER and stop at the first match:
+EXAMPLE INPUT cells:
+  cell_id=0  A/N1/1: N1_PRB=0.0%  N12_PRB=1.2%  QoS=0.00 Mbps  [Awake]
+  cell_id=1  B/N1/1: N1_PRB=4.5%  N12_PRB=18.0%  QoS=2.1 Mbps  [Awake]
+  cell_id=2  C/N1/1: N1_PRB=38.0%  N12_PRB=55.0%  QoS=7.8 Mbps  [Awake]
+  cell_id=3  D/N1/1: N1_PRB=0.0%  N12_PRB=71.2%  QoS=6.5 Mbps  [Sleeping]
 
-  RULE WAKE:    cell is [Sleeping] AND N12_PRB > 60  → add wake action
-  RULE SLEEP_1: cell is [Awake]    AND N1_PRB = 0 AND N12_PRB = 0  → add sleep action (no traffic on any band)
-  RULE SLEEP_2: cell is [Awake]    AND N1_PRB < 12               → add sleep action (N1 band idle, QoS protected by N12)
-  RULE NONE:    otherwise → no action for this cell
+CORRECT OUTPUT for the example (cells 0 and 1 have N1_PRB < 12; cell 3 is Sleeping with N12_PRB > 60):
+[{"action": "sleep", "cell_id": 0, "reason": "N1_PRB=0.0% < 12%"}, {"action": "sleep", "cell_id": 1, "reason": "N1_PRB=4.5% < 12%"}, {"action": "wake", "cell_id": 3, "reason": "N12_PRB=71.2% > 60%"}]
 
-Apply every rule to every cell. Output one JSON action per matching cell.
+Now produce the JSON array for the cells below. Output ONLY [...] — nothing before or after.
 """
 
 

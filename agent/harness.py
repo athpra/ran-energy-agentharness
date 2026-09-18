@@ -100,6 +100,7 @@ class AgentHarness:
         kpi_summary: str,
         cell_ids: list[int],
         current_utilization: dict[int, float],
+        static_sleep_candidates: list[int] | None = None,
     ) -> IterationResult:
         t_start = time.time()
 
@@ -121,18 +122,18 @@ class AgentHarness:
             system_prompt=self.planner_system_prompt,
         )
 
-        # Fallback: if the LLM proposes nothing but tool pre-analysis identified
-        # sleep candidates, use those directly.  This applies only when all five
-        # tools are enabled (full_harness condition); the other conditions have no
-        # sleep_candidates in tool_ctx.
-        if not proposed and tool_ctx.get("sleep_candidates"):
-            candidates = tool_ctx["sleep_candidates"]
+        # Fallback: if the LLM proposes nothing but candidates are available
+        # (from tool pre-analysis for full_harness, or from static PRB rules for
+        # baseline_digital_twin), use those directly.
+        fallback_candidates = tool_ctx.get("sleep_candidates") or static_sleep_candidates
+        if not proposed and fallback_candidates:
+            candidates = fallback_candidates
+            source = "tool analysis" if tool_ctx.get("sleep_candidates") else "blueprint PRB rule: N1_PRB < 12%"
             proposed = [
-                {"action": "sleep", "cell_id": cid,
-                 "reason": "tool analysis: low PRB, no active faults, safe interference"}
+                {"action": "sleep", "cell_id": cid, "reason": source}
                 for cid in candidates
             ]
-            planner_raw = f"[tool-fallback] LLM returned []; using {len(proposed)} tool-derived candidates: {candidates}"
+            planner_raw = f"[fallback] LLM returned []; using {len(proposed)} candidates: {candidates}"
 
         # Step 3 — simulate proposed actions (Sim 1)
         if proposed:
