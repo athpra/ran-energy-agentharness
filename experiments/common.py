@@ -330,11 +330,12 @@ def save_results(run_dir: Path, results: list[dict]) -> None:
     summary_rows = [
         {
             "iteration":    r["iteration"],
+            "condition":    r.get("condition", ""),
             "n_proposed":   r["n_proposed"],
             "n_approved":   r["n_approved"],
             "n_rejected":   r["n_rejected"],
-            "planner_s":    r["planner_elapsed_s"],
-            "validator_s":  r["validator_elapsed_s"],
+            "planner_s":    r.get("planner_elapsed_s", 0),
+            "validator_s":  r.get("validator_elapsed_s", 0),
             "total_s":      r["total_elapsed_s"],
         }
         for r in results
