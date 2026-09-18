@@ -118,6 +118,8 @@ _TRAFFIC_PROFILES = [
 
 DEFAULT_THROUGHPUT_MBPS = 8.0
 SIM_DURATION            = 10   # seconds per simulation run
+SIM_MAX_RETRIES         = 3
+SIM_RETRY_DELAY_S       = 30
 
 
 def _get_profile(ts: pd.Timestamp) -> dict:
@@ -204,33 +206,50 @@ def make_sim_fns(scenario):
                 svc["targetTput_Mbps"] = DEFAULT_THROUGHPUT_MBPS
 
     def _run(actions: list[dict], update_state: bool) -> tuple[str, dict]:
+        import time as _time
+
         profile = _get_profile(pd.Timestamp.now())
         _apply_profile(profile)
 
         scenario.config["System"]["batch_mode"] = True
         scenario.config["System"]["duration"]   = SIM_DURATION
 
-        sim = scenario.simulation(force_start=True, adk_pace=True)
-        sim.start()
+        last_exc: Exception | None = None
+        for attempt in range(SIM_MAX_RETRIES):
+            try:
+                sim = scenario.simulation(force_start=True, adk_pace=True)
+                sim.start()
 
-        # Replay accumulated sleep state so each fresh simulation starts from
-        # the current network configuration, not a clean slate.
-        for cell_name, is_sleeping in cell_sleep_state.items():
-            cmd = "turn_off" if is_sleeping else "turn_on"
-            sim.command(cmd, cell=cell_name, reason="accumulated state")
+                # Replay accumulated sleep state so each fresh simulation starts from
+                # the current network configuration, not a clean slate.
+                for cell_name, is_sleeping in cell_sleep_state.items():
+                    cmd = "turn_off" if is_sleeping else "turn_on"
+                    sim.command(cmd, cell=cell_name, reason="accumulated state")
 
-        # Apply new actions for this iteration
-        for a in (actions or []):
-            cell_name = cell_name_map.get(a["cell_id"], str(a["cell_id"]))
-            if a["action"] == "sleep":
-                sim.command("turn_off", cell=cell_name, reason=a.get("reason", "energy optimization"))
-            elif a["action"] == "wake":
-                sim.command("turn_on",  cell=cell_name, reason=a.get("reason", "capacity needed"))
+                # Apply new actions for this iteration
+                for a in (actions or []):
+                    cell_name = cell_name_map.get(a["cell_id"], str(a["cell_id"]))
+                    if a["action"] == "sleep":
+                        sim.command("turn_off", cell=cell_name, reason=a.get("reason", "energy optimization"))
+                    elif a["action"] == "wake":
+                        sim.command("turn_on",  cell=cell_name, reason=a.get("reason", "capacity needed"))
 
-        sim.run_for(f"{SIM_DURATION}s")
-        sim_ue   = sim.query("UEReports",   start=SIM_DURATION - 1, stop=SIM_DURATION)
-        sim_cell = sim.query("CellReports", start=SIM_DURATION - 1, stop=SIM_DURATION)
-        sim.finish()
+                sim.run_for(f"{SIM_DURATION}s")
+                sim_ue   = sim.query("UEReports",   start=SIM_DURATION - 1, stop=SIM_DURATION)
+                sim_cell = sim.query("CellReports", start=SIM_DURATION - 1, stop=SIM_DURATION)
+                sim.finish()
+                break  # success
+
+            except (RuntimeError, Exception) as exc:
+                last_exc = exc
+                if attempt < SIM_MAX_RETRIES - 1:
+                    print(f"  RSG error (attempt {attempt + 1}/{SIM_MAX_RETRIES}): {exc}. "
+                          f"Retrying in {SIM_RETRY_DELAY_S}s...")
+                    _time.sleep(SIM_RETRY_DELAY_S)
+                else:
+                    raise RuntimeError(
+                        f"RSG simulation failed after {SIM_MAX_RETRIES} attempts"
+                    ) from last_exc
 
         sim_cell = sim_cell.drop_duplicates(subset=["Viavi.Cell.Name"], keep="last").reset_index(drop=True)
 
