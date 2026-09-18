@@ -83,7 +83,7 @@ def run(
 def main():
     parser = argparse.ArgumentParser(description="Full agent harness with all tools")
     parser.add_argument("--intent",     default="5 Mbps")
-    parser.add_argument("--iterations", type=int, default=20)
+    parser.add_argument("--iterations", type=int, default=int(os.environ.get("ITER", 96)))
     parser.add_argument("--rsg-host",   default=os.getenv("RSG_HOST", ""))
     parser.add_argument(
         "--tools", nargs="*", default=list(ALL_TOOLS),
