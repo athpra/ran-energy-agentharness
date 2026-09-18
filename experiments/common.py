@@ -260,13 +260,17 @@ def make_sim_fns(scenario):
 # ── KPI formatting ────────────────────────────────────────────────────────────
 
 def _kpi_to_text_viavi(kpis: dict) -> str:
-    """Format VIAVI KPI dict (from _compute_kpis) as a prompt-ready string."""
+    """Format VIAVI KPI dict (from _compute_kpis) as a prompt-ready string.
+
+    Integer cell_id is included in each line so the Planner can reference
+    it directly in JSON actions.
+    """
     lines = [f"avg_throughput={kpis['avg_throughput_mbps']:.2f} Mbps  "
              f"sleeping={kpis['sleeping_cells']}/{kpis['total_cells']}"]
-    for site, s in sorted(kpis.get("per_site", {}).items()):
+    for idx, (site, s) in enumerate(sorted(kpis.get("per_site", {}).items())):
         state = "Sleeping" if s["n1_sleeping"] else "Awake"
         lines.append(
-            f"  {site}: N1_PRB={s['n1_prb']:.1f}%  N12_PRB={s['n12_prb']:.1f}%  "
+            f"  cell_id={idx}  {site}: N1_PRB={s['n1_prb']:.1f}%  N12_PRB={s['n12_prb']:.1f}%  "
             f"QoS={s['avg_qos']:.2f} Mbps  [{state}]"
         )
     return "\n".join(lines)
