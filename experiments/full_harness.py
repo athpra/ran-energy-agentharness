@@ -90,7 +90,7 @@ def main():
         choices=list(ALL_TOOLS),
         help="Subset of tools to enable (default: all). Use for ablation runs.",
     )
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
 
     enabled = frozenset(args.tools)
     label   = "full_harness" if enabled == ALL_TOOLS else "ablation_" + "_".join(sorted(enabled))

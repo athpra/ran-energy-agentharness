@@ -90,7 +90,7 @@ def main():
     parser.add_argument("--sleep-thresh", type=float, default=15.0)
     parser.add_argument("--wake-thresh",  type=float, default=30.0)
     parser.add_argument("--rsg-host",     default=os.getenv("RSG_HOST", ""))
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
 
     from experiments.common import connect_scenario
     scenario = connect_scenario(args.rsg_host)

@@ -75,7 +75,7 @@ def main():
     parser.add_argument("--intent",     default="5 Mbps")
     parser.add_argument("--iterations", type=int, default=20)
     parser.add_argument("--rsg-host",   default=os.getenv("RSG_HOST", ""))
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
 
     scenario = connect_scenario(args.rsg_host)
 
