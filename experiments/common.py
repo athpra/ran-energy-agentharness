@@ -334,12 +334,28 @@ def get_current_kpis(scenario) -> dict:
     scenario.config["System"]["batch_mode"] = True
     scenario.config["System"]["duration"]   = SIM_DURATION
 
-    sim = scenario.simulation(force_start=True, adk_pace=True)
-    sim.start()
-    sim.run_for(f"{SIM_DURATION}s")
-    sim_ue   = sim.query("UEReports",   start=SIM_DURATION - 1, stop=SIM_DURATION)
-    sim_cell = sim.query("CellReports", start=SIM_DURATION - 1, stop=SIM_DURATION)
-    sim.finish()
+    import time as _time
+    last_exc: Exception | None = None
+    for attempt in range(SIM_MAX_RETRIES):
+        try:
+            sim = scenario.simulation(force_start=True, adk_pace=True)
+            sim.start()
+            sim.run_for(f"{SIM_DURATION}s")
+            sim_ue   = sim.query("UEReports",   start=SIM_DURATION - 1, stop=SIM_DURATION)
+            sim_cell = sim.query("CellReports", start=SIM_DURATION - 1, stop=SIM_DURATION)
+            sim.finish()
+            break
+        except Exception as exc:
+            last_exc = exc
+            if attempt < SIM_MAX_RETRIES - 1:
+                print(f"  RSG error in get_current_kpis (attempt {attempt + 1}/{SIM_MAX_RETRIES}): {exc}. "
+                      f"Retrying in {SIM_RETRY_DELAY_S}s...")
+                _time.sleep(SIM_RETRY_DELAY_S)
+            else:
+                raise RuntimeError(
+                    f"get_current_kpis failed after {SIM_MAX_RETRIES} attempts"
+                ) from last_exc
+
     sim_cell = sim_cell.drop_duplicates(subset=["Viavi.Cell.Name"], keep="last").reset_index(drop=True)
     return _compute_kpis(sim_ue, sim_cell)
 
