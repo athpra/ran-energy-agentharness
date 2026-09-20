@@ -19,7 +19,7 @@ import time
 
 import pandas as pd
 
-from experiments.common import get_llm, get_current_kpis, connect_scenario, make_run_dir, save_results, make_sim_fns, _kpi_to_text
+from experiments.common import get_llm, get_current_kpis, connect_scenario, make_run_dir, save_results, make_sim_fns, _kpi_to_text, apply_job_arguments
 from agent.planner import plan
 
 # Aggressive prompt for open-loop baseline: maximise energy savings without
@@ -118,6 +118,7 @@ def run(
 
 
 def main():
+    apply_job_arguments()
     parser = argparse.ArgumentParser(description="Baseline B: open-loop LLM")
     parser.add_argument("--intent",     default="5 Mbps")
     parser.add_argument("--iterations", type=int, default=20)

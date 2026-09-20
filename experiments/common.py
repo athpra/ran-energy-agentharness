@@ -25,6 +25,21 @@ PROJECT_ROOT = Path(__file__).parent.parent
 OUTPUT_DIR   = PROJECT_ROOT / "output"
 
 
+# ── CML job arguments helper ──────────────────────────────────────────────────
+
+def apply_job_arguments() -> None:
+    """Inject CML's JOB_ARGUMENTS env var into sys.argv.
+
+    CML's PBJ Workbench passes the job Arguments field as the JOB_ARGUMENTS
+    environment variable rather than directly into sys.argv, so argparse never
+    sees them unless we do this explicitly.  Call once at the top of main().
+    """
+    import shlex
+    job_args = os.getenv("JOB_ARGUMENTS", "").strip()
+    if job_args:
+        sys.argv.extend(shlex.split(job_args))
+
+
 # ── LLM factory ──────────────────────────────────────────────────────────────
 
 def get_llm() -> ChatOpenAI:

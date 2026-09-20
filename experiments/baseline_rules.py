@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from experiments.common import get_current_kpis, make_run_dir, save_results
+from experiments.common import get_current_kpis, make_run_dir, save_results, apply_job_arguments
 
 
 def rule_policy(
@@ -89,6 +89,7 @@ def run(
 
 
 def main():
+    apply_job_arguments()
     parser = argparse.ArgumentParser(description="Baseline A: rule-based policy")
     parser.add_argument("--intent",       default="5 Mbps")
     parser.add_argument("--iterations",   type=int,   default=20)

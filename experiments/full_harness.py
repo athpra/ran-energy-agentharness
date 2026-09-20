@@ -25,7 +25,8 @@ import pandas as pd
 from agent.harness   import AgentHarness
 from agent.context   import ALL_TOOLS
 from experiments.common import (
-    get_llm, get_current_kpis, connect_scenario, make_run_dir, save_results, append_result, make_sim_fns, _kpi_to_text
+    get_llm, get_current_kpis, connect_scenario, make_run_dir, save_results, append_result, make_sim_fns, _kpi_to_text,
+    apply_job_arguments,
 )
 
 
@@ -82,6 +83,7 @@ def run(
 
 
 def main():
+    apply_job_arguments()
     parser = argparse.ArgumentParser(description="Full agent harness with all tools")
     parser.add_argument("--intent",     default="5 Mbps")
     parser.add_argument("--iterations", type=int, default=int(os.environ.get("ITER", 96)))
