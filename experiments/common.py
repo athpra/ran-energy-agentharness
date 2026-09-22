@@ -307,6 +307,105 @@ def make_sim_fns(scenario):
     return sim_test_fn, sim_apply_fn
 
 
+# ── Continuous VTZ-cycle simulation ──────────────────────────────────────────
+
+VTZ_STEP_S   = 900   # simulated seconds per agent iteration (15 VTZ minutes)
+VTZ_SETTLE_S = 30    # simulated seconds to stabilise after commands
+VTZ_QUERY_W  = 10    # query window width (last N simulated seconds)
+
+
+def make_sim_fns_continuous(scenario, step_s: int = VTZ_STEP_S,
+                             settle_s: int = VTZ_SETTLE_S,
+                             query_window_s: int = VTZ_QUERY_W):
+    """
+    Return (advance_step, sim_test_fn, sim_apply_fn, finish_sim) for a
+    single continuous VIAVI simulation.
+
+    Unlike make_sim_fns(), this starts ONE simulation that runs for the
+    full experiment.  VIAVI's internal VTZ clock cycles through Night /
+    Morning / Evening traffic profiles naturally, producing the dynamic
+    throughput variation visible in the blueprint.
+
+    Call order each iteration:
+        kpis = advance_step()          # advance VTZ clock, get pre-action KPIs
+        # harness calls sim_test_fn and sim_apply_fn internally
+        ...
+    Call finish_sim() once at the end.
+
+    sim_test_fn(actions) returns the current (pre-action) KPIs as the
+    Sim-1 evidence — no extra simulation time consumed.  The Validator
+    therefore sees the live network state and decides whether applying the
+    proposed changes is safe.
+
+    sim_apply_fn(actions) issues commands to the running simulation,
+    advances settle_s seconds for stabilisation, and returns post-action KPIs.
+    """
+    cell_sleep_state: dict[str, bool] = {}
+    cell_name_map:    dict[int, str]  = {}
+    cumulative_t = [0]
+    last_kpis:    list               = [None]
+
+    # Start the simulation with enough duration for a full VTZ cycle + buffer
+    total_s = step_s * 110 + settle_s * 110 + 60   # ~29 h of headroom
+    scenario.config["System"]["batch_mode"] = True
+    scenario.config["System"]["duration"]   = total_s
+
+    sim = scenario.simulation(force_start=True, adk_pace=True)
+    sim.start()
+
+    # Warmup: advance briefly so VIAVI populates CellReports
+    _WU = SIM_DURATION
+    sim.run_for(f"{_WU}s")
+    cumulative_t[0] = _WU
+    wu_ue   = sim.query("UEReports",   start=_WU - 1, stop=_WU)
+    wu_cell = sim.query("CellReports", start=_WU - 1, stop=_WU)
+    wu_cell = (wu_cell
+               .drop_duplicates(subset=["Viavi.Cell.Name"], keep="last")
+               .reset_index(drop=True))
+    n1_names = sorted(
+        wu_cell.loc[wu_cell["Viavi.Cell.Name"].str.contains("/N1/"),
+                    "Viavi.Cell.Name"].unique()
+    )
+    cell_name_map.update({idx: name for idx, name in enumerate(n1_names)})
+    print(f"Continuous VTZ sim started. Cell map: {len(cell_name_map)} N1 cells.")
+
+    def _query_now() -> dict:
+        t  = cumulative_t[0]
+        ue = sim.query("UEReports",   start=max(0, t - query_window_s), stop=t)
+        cl = sim.query("CellReports", start=max(0, t - query_window_s), stop=t)
+        cl = cl.drop_duplicates(subset=["Viavi.Cell.Name"], keep="last").reset_index(drop=True)
+        return _compute_kpis(ue, cl)
+
+    def advance_step() -> dict:
+        """Advance one VTZ time step; return current (pre-action) KPIs."""
+        sim.run_for(f"{step_s}s")
+        cumulative_t[0] += step_s
+        last_kpis[0] = _query_now()
+        return last_kpis[0]
+
+    def sim_test_fn(actions: list[dict]) -> tuple[str, dict]:
+        """Return the pre-action network state as Sim-1 evidence."""
+        kpis = last_kpis[0] or {}
+        return _kpi_to_text_viavi(kpis), kpis
+
+    def sim_apply_fn(actions: list[dict]) -> tuple[str, dict]:
+        """Issue approved commands, settle, return post-action KPIs."""
+        for a in (actions or []):
+            cell_name = cell_name_map.get(a["cell_id"], str(a["cell_id"]))
+            cmd = "turn_off" if a["action"] == "sleep" else "turn_on"
+            sim.command(cmd, cell=cell_name, reason=a.get("reason", ""))
+            cell_sleep_state[cell_name] = (a["action"] == "sleep")
+        sim.run_for(f"{settle_s}s")
+        cumulative_t[0] += settle_s
+        kpis = _query_now()
+        return _kpi_to_text_viavi(kpis), kpis
+
+    def finish_sim() -> None:
+        sim.finish()
+
+    return advance_step, sim_test_fn, sim_apply_fn, finish_sim
+
+
 # ── KPI formatting ────────────────────────────────────────────────────────────
 
 def _kpi_to_text_viavi(kpis: dict) -> str:
