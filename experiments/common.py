@@ -86,10 +86,15 @@ def connect_scenario(rsg_host: str = "", scenario_conf: str | None = None):
     if not rsg_host:
         rsg_host = os.getenv("RSG_HOST", "").strip()
 
-    from viavi.rsg import Scenario
-
     if scenario_conf is None:
         scenario_conf = str(PROJECT_ROOT / "ai_rsg_config" / "config.conf")
+
+    if os.getenv("USE_MOCK_RSG", "").strip().lower() in ("1", "true", "yes"):
+        from mock_rsg.scenario import Scenario as MockScenario
+        print("Mock RSG active (USE_MOCK_RSG=1)")
+        return MockScenario(scenario_conf, "mock://")
+
+    from viavi.rsg import Scenario
 
     # Check for a full URL override (e.g. RSG_ADDRESS env var)
     rsg_address_override = os.getenv("RSG_ADDRESS", "").strip()
