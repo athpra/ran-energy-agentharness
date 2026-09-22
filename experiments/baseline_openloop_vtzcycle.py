@@ -78,8 +78,22 @@ def run(
             system_prompt=_OPENLOOP_AGGRESSIVE_PROMPT,
         )
 
+        # Filter out invalid LLM actions: LLM sometimes proposes sleep on
+        # already-sleeping cells (sees PRB=0% < threshold, ignores [Sleeping] tag).
+        if proposed:
+            _site_keys = sorted(kpis["per_site"].keys())
+            _site_by_id = {j: k for j, k in enumerate(_site_keys)}
+            proposed = [
+                a for a in proposed
+                if a.get("cell_id") in _site_by_id and (
+                    (a["action"] == "sleep" and not kpis["per_site"][_site_by_id[a["cell_id"]]]["n1_sleeping"])
+                    or (a["action"] == "wake"  and     kpis["per_site"][_site_by_id[a["cell_id"]]]["n1_sleeping"])
+                )
+            ]
+
         if not proposed:
             site_keys = sorted(kpis["per_site"].keys())
+            # Sleep rule: awake cells below PRB threshold
             proposed = [
                 {
                     "action": "sleep", "cell_id": j,
@@ -97,6 +111,25 @@ def run(
                     f"[aggressive-fallback] LLM returned []; generated {len(proposed)} "
                     f"actions from N1_PRB < {_OPENLOOP_PRB_THRESHOLD:.0f}% rule"
                 )
+            else:
+                # Wake rule: sleeping cells with overloaded N12 neighbor (> 60%)
+                proposed = [
+                    {
+                        "action": "wake", "cell_id": j,
+                        "reason": (
+                            f"N12_PRB={kpis['per_site'][k]['n12_prb']:.1f}% "
+                            f"> 60% [aggressive-fallback]"
+                        ),
+                    }
+                    for j, k in enumerate(site_keys)
+                    if kpis["per_site"][k]["n1_sleeping"]
+                    and kpis["per_site"][k]["n12_prb"] > 60.0
+                ]
+                if proposed:
+                    planner_raw = (
+                        f"[aggressive-fallback] generated {len(proposed)} "
+                        f"wake actions from N12_PRB > 60% rule"
+                    )
 
         sim_summary, post_kpis = (
             sim_apply_fn(proposed) if proposed else ("No actions proposed.", {})
