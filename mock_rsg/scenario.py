@@ -38,27 +38,45 @@ _N1_NAMES  = [n for n in _ALL_CELL_NAMES if "/N1/"  in n]   # 21 sleepable cells
 _N12_NAMES = [n for n in _ALL_CELL_NAMES if "/N12/" in n]   # 21 always-on cells
 
 # ── Radio model ───────────────────────────────────────────────────────────────
-# tp_per_UE = TARGET × n_awake / (n_awake + BETA × n_UEs)
-# Derived from Night/Morning calibration points.
-_TARGET_MBPS = 8.0
-_BETA        = 0.040   # load/interference factor
-
-# PRB saturation: n UEs per awake N1 cell → 100% PRB
-_PRB_SAT_UES    = 24.0
-# N12 saturates faster (smaller coverage, mmWave-like); also receives displaced
-# UEs from sleeping N1 cells, so N12_PRB correctly spikes above the 60% wake
-# threshold when enough N1 cells are sleeping under high load.
+_TARGET_MBPS     = 8.0
+_BETA            = 0.040   # load/interference factor
+_PRB_SAT_UES     = 24.0    # UEs per awake N1 cell → 100% PRB
 _N12_PRB_SAT_UES = 10.0
+_N12_EFFICIENCY  = 0.20    # N12 provides 20% of N1 per-cell capacity for displaced UEs
+
+# Per-cell load factors: heterogeneous traffic demand across 21 N1 cells.
+# At Night  (base PRB≈4%):  cells with factor<3.0 qualify for sleep (<12% PRB) → 16 candidates
+# At Morning(base PRB≈40%): only cells with factor<0.30 qualify              →  5 candidates
+# At Evening(base PRB≈80%): only cells with factor<0.15 qualify              →  2 candidates
+_CELL_LOAD_FACTORS = [
+    # 5 very cold cells — always sleepable
+    0.10, 0.15, 0.20, 0.25, 0.28,
+    # 7 normal cells — sleepable at Night, not Morning
+    0.50, 0.65, 0.80, 0.95, 1.10, 1.25, 1.40,
+    # 4 moderately loaded cells
+    1.60, 1.90, 2.20, 2.60,
+    # 5 hot cells — never qualify for sleep (PRB always ≥ 12% at Night)
+    3.10, 3.60, 4.20, 5.00, 6.00,
+]
+assert len(_CELL_LOAD_FACTORS) == len(_N1_NAMES)
 
 # Per-UE throughput noise (±σ fraction of mean)
 _TP_NOISE_FRAC = 0.06
 
 
-def _tp_per_ue(n_ues: int, n_awake: int) -> float:
-    n_awake = max(1, n_awake)
+def _tp_per_ue(n_ues: int, n_awake_n1: int) -> float:
+    """Network-average per-UE DL throughput.
+
+    Sleeping N1 cells displace their UEs to N12 at reduced efficiency, so
+    excessive sleeping degrades throughput — giving the Validator real signal
+    to reject unsafe proposals at high load.
+    """
+    n1_total  = len(_N1_NAMES)
+    n12_equiv = (n1_total - n_awake_n1) * _N12_EFFICIENCY
+    effective = max(0.5, n_awake_n1 + n12_equiv)
     if n_ues == 0:
         return _TARGET_MBPS
-    return _TARGET_MBPS * n_awake / (n_awake + _BETA * n_ues)
+    return _TARGET_MBPS * effective / (effective + _BETA * n_ues)
 
 
 def _n1_prb(n_ues: int, n_awake_n1: int) -> float:
@@ -155,12 +173,18 @@ class MockSimulation:
         return pd.DataFrame(rows)
 
     def _cell_reports(self, n_awake_n1: int) -> pd.DataFrame:
-        n_ues = self._n_ues
-        rows  = []
+        n_ues    = self._n_ues
+        rows     = []
+        base_prb = _n1_prb(n_ues, n_awake_n1)   # network-average PRB for awake cells
 
-        for name in _N1_NAMES:
+        for i, name in enumerate(_N1_NAMES):
             sleeping = name in self._sleeping
-            prb = 0.0 if sleeping else _n1_prb(n_ues, n_awake_n1)
+            if sleeping:
+                prb = 0.0
+            else:
+                # Per-cell PRB scaled by cell load factor — creates spatial variation
+                # so only a subset of cells qualify for sleep at any given time.
+                prb = round(min(100.0, base_prb * _CELL_LOAD_FACTORS[i]), 1)
             rows.append({
                 "Viavi.Cell.Name":      name,
                 "RRU.PrbTotDl":         prb,

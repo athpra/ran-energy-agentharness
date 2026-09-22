@@ -69,18 +69,25 @@ def run(
         kpi_summary = _kpi_to_text_viavi(kpis)
 
         # Blueprint PRB rule: N1_PRB < 12 % → sleep candidate (mirrors blueprint SQL).
-        sleep_cands = [
-            j for j, k in enumerate(site_keys)
-            if not kpis["per_site"][k]["n1_sleeping"]
-            and kpis["per_site"][k]["n1_prb"] < 12.0
-        ]
+        # Sort by PRB ascending (most underloaded first) and cap at 5 per iteration
+        # so the agent makes incremental decisions rather than sleeping everything
+        # at once — matching the gradual behaviour seen in the real VIAVI runs.
+        _MAX_ACTIONS = 5
+        sleep_cands = sorted(
+            (j for j, k in enumerate(site_keys)
+             if not kpis["per_site"][k]["n1_sleeping"]
+             and kpis["per_site"][k]["n1_prb"] < 12.0),
+            key=lambda j: kpis["per_site"][site_keys[j]]["n1_prb"],
+        )[:_MAX_ACTIONS]
 
         # Wake candidates: sleeping cells when QoS is below the operator intent.
+        # Sort by PRB descending (most needed first) and also cap at 5 per iteration.
         intent_mbps = float(operator_intent.split()[0])
-        wake_cands = (
-            [j for j, k in enumerate(site_keys) if kpis["per_site"][k]["n1_sleeping"]]
-            if kpis.get("avg_throughput_mbps", 0) < intent_mbps else []
-        )
+        wake_cands = sorted(
+            (j for j, k in enumerate(site_keys) if kpis["per_site"][k]["n1_sleeping"]),
+            key=lambda j: kpis["per_site"][site_keys[j]]["n12_prb"],
+            reverse=True,
+        )[:_MAX_ACTIONS] if kpis.get("avg_throughput_mbps", 0) < intent_mbps else []
 
         result = harness.run_iteration(
             iteration=i + 1,
