@@ -75,6 +75,13 @@ def run(
             and kpis["per_site"][k]["n1_prb"] < 12.0
         ]
 
+        # Wake candidates: sleeping cells when QoS is below the operator intent.
+        intent_mbps = float(operator_intent.split()[0])
+        wake_cands = (
+            [j for j, k in enumerate(site_keys) if kpis["per_site"][k]["n1_sleeping"]]
+            if kpis.get("avg_throughput_mbps", 0) < intent_mbps else []
+        )
+
         result = harness.run_iteration(
             iteration=i + 1,
             timestamp=virtual_ts,
@@ -82,6 +89,7 @@ def run(
             cell_ids=cell_ids,
             current_utilization=utilization,
             static_sleep_candidates=sleep_cands or None,
+            static_wake_candidates=wake_cands or None,
         )
         r_dict = result.to_dict()
         r_dict["condition"]   = condition_name

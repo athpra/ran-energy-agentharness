@@ -101,6 +101,7 @@ class AgentHarness:
         cell_ids: list[int],
         current_utilization: dict[int, float],
         static_sleep_candidates: list[int] | None = None,
+        static_wake_candidates:  list[int] | None = None,
     ) -> IterationResult:
         t_start = time.time()
 
@@ -134,6 +135,19 @@ class AgentHarness:
                 for cid in candidates
             ]
             planner_raw = f"[fallback] LLM returned []; using {len(proposed)} candidates: {candidates}"
+
+        # Wake fallback: if QoS intent is being violated and sleeping cells were
+        # explicitly flagged by the caller, wake them even if the LLM missed it.
+        if not proposed and static_wake_candidates:
+            proposed = [
+                {"action": "wake", "cell_id": cid,
+                 "reason": "QoS below intent: restoring capacity"}
+                for cid in static_wake_candidates
+            ]
+            planner_raw = (
+                f"[wake-fallback] LLM returned []; waking {len(proposed)} cells "
+                f"to restore QoS: {static_wake_candidates}"
+            )
 
         # Step 3 — simulate proposed actions (Sim 1)
         if proposed:
