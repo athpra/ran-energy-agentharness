@@ -329,16 +329,26 @@ def make_sim_fns(scenario):
 
     _night_thp   = _night_kpis.get("avg_throughput_mbps", 0)
     _morning_thp = _morning_kpis.get("avg_throughput_mbps", 0)
-    if _morning_thp > _night_thp * 1.5:
+    # avg_throughput_mbps is mean PER-UE throughput. Night has 0.1× UEs so each
+    # UE gets more bandwidth → Night per-UE throughput > Morning per-UE throughput.
+    _ratio = _night_thp / max(_morning_thp, 0.001)
+    if _ratio > 1.1:
         print(
-            f"VTZ variation confirmed: Night={_night_thp:.2f} Mbps → Morning={_morning_thp:.2f} Mbps  "
-            f"(ratio={_morning_thp / max(_night_thp, 0.001):.1f}×)"
+            f"VTZ variation confirmed: Night={_night_thp:.2f} Mbps/UE > "
+            f"Morning={_morning_thp:.2f} Mbps/UE  "
+            f"(Night has ~10× fewer UEs → higher per-UE throughput, ratio={_ratio:.2f}×)"
+        )
+    elif abs(_ratio - 1.0) < 0.05:
+        print(
+            f"WARNING: VTZ variation NOT detected. Night={_night_thp:.2f} Mbps, "
+            f"Morning={_morning_thp:.2f} Mbps (ratio={_ratio:.2f}) — "
+            f"force_start may be re-reading the disk config and discarding "
+            f"scenario.config UE-count mutations."
         )
     else:
         print(
-            f"WARNING: VTZ variation NOT detected. Night={_night_thp:.2f} Mbps, "
-            f"Morning={_morning_thp:.2f} Mbps — force_start may be re-reading the "
-            f"disk config and discarding scenario.config UE-count mutations."
+            f"VTZ variation detected (ratio={_ratio:.2f}×): "
+            f"Night={_night_thp:.2f} Mbps/UE, Morning={_morning_thp:.2f} Mbps/UE"
         )
 
     return sim_test_fn, sim_apply_fn, set_virtual_ts
