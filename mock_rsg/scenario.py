@@ -44,7 +44,11 @@ _TARGET_MBPS = 8.0
 _BETA        = 0.040   # load/interference factor
 
 # PRB saturation: n UEs per awake N1 cell → 100% PRB
-_PRB_SAT_UES = 24.0
+_PRB_SAT_UES    = 24.0
+# N12 saturates faster (smaller coverage, mmWave-like); also receives displaced
+# UEs from sleeping N1 cells, so N12_PRB correctly spikes above the 60% wake
+# threshold when enough N1 cells are sleeping under high load.
+_N12_PRB_SAT_UES = 10.0
 
 # Per-UE throughput noise (±σ fraction of mean)
 _TP_NOISE_FRAC = 0.06
@@ -63,12 +67,17 @@ def _n1_prb(n_ues: int, n_awake_n1: int) -> float:
     return round(min(100.0, (n_ues / n_awake_n1) / _PRB_SAT_UES * 100.0), 1)
 
 
-def _n12_prb(n_ues: int) -> float:
-    # N12 carries overflow; empirically ~40% of N1 PRB at the same load
-    n12_awake = len(_N12_NAMES)
-    if n12_awake == 0 or n_ues == 0:
+def _n12_prb(n_ues: int, n_awake_n1: int) -> float:
+    n1_total  = len(_N1_NAMES)   # 21
+    n12_total = len(_N12_NAMES)  # 21
+    if n12_total == 0 or n_ues == 0:
         return 0.0
-    return round(min(40.0, (n_ues / n12_awake) / _PRB_SAT_UES * 40.0), 1)
+    sleeping_n1 = n1_total - n_awake_n1
+    # UEs displaced from sleeping N1 cells all fall back to N12
+    displaced = n_ues * sleeping_n1 / n1_total if n1_total > 0 else n_ues
+    # Normal secondary N12 usage from awake N1 cells (~40% offload)
+    normal    = n_ues * n_awake_n1 / n1_total * 0.4 if n1_total > 0 else 0.0
+    return round(min(100.0, (displaced + normal) / n12_total / _N12_PRB_SAT_UES * 100.0), 1)
 
 
 # ── MockSimulation ─────────────────────────────────────────────────────────────
@@ -158,7 +167,7 @@ class MockSimulation:
                 "Viavi.isEnergySaving": int(sleeping),
             })
 
-        n12_prb = _n12_prb(n_ues)
+        n12_prb = _n12_prb(n_ues, n_awake_n1)
         for name in _N12_NAMES:
             rows.append({
                 "Viavi.Cell.Name":      name,
