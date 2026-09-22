@@ -71,14 +71,14 @@ def run(
         utilization = {j: kpis["per_site"][k]["n1_prb"] for j, k in enumerate(site_keys)}
         kpi_summary = _kpi_to_text_viavi(kpis)
 
-        # Wake candidates: sleeping cells when QoS drops below intent, capped at 5.
-        _MAX_ACTIONS = 5
-        intent_mbps  = float(operator_intent.split()[0])
+        # Wake candidates: sleeping cells when QoS drops below intent.
+        # Sort by N12_PRB descending so most-overloaded neighbors are woken first.
+        intent_mbps = float(operator_intent.split()[0])
         wake_cands = sorted(
             (j for j, k in enumerate(site_keys) if kpis["per_site"][k]["n1_sleeping"]),
             key=lambda j: kpis["per_site"][site_keys[j]]["n12_prb"],
             reverse=True,
-        )[:_MAX_ACTIONS] if kpis.get("avg_throughput_mbps", 0) < intent_mbps else []
+        ) if kpis.get("avg_throughput_mbps", 0) < intent_mbps else []
 
         result = harness.run_iteration(
             iteration=i + 1,
