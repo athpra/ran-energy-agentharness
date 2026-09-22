@@ -24,7 +24,6 @@ from agent.planner  import BLUEPRINT_SYSTEM_PROMPT
 from experiments.common import (
     apply_job_arguments,
     connect_scenario,
-    get_current_kpis,
     get_llm,
     make_run_dir,
     make_sim_fns,
@@ -58,11 +57,11 @@ def run(
     for i in range(n_iterations):
         virtual_ts = ts + pd.Timedelta(minutes=15 * i)
 
-        # Set virtual timestamp so sim_test_fn / sim_apply_fn use the right traffic profile
+        # Set virtual timestamp so all sim calls use the right traffic profile
         set_virtual_ts(virtual_ts)
 
-        # Get current network state at this virtual time
-        kpis = get_current_kpis(scenario, timestamp=virtual_ts)
+        # Get current network state including accumulated sleep history
+        _, kpis = sim_test_fn([])
 
         site_keys   = sorted(kpis["per_site"].keys())
         cell_ids    = list(range(len(site_keys)))

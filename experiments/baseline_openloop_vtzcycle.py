@@ -20,7 +20,6 @@ from agent.planner import plan
 from experiments.common import (
     apply_job_arguments,
     connect_scenario,
-    get_current_kpis,
     get_llm,
     make_run_dir,
     make_sim_fns,
@@ -55,7 +54,7 @@ def run(
     run_dir=None,
 ) -> list[dict]:
     llm = get_llm()
-    _, sim_apply_fn, set_virtual_ts = make_sim_fns(scenario)
+    sim_test_fn, sim_apply_fn, set_virtual_ts = make_sim_fns(scenario)
 
     ts = pd.Timestamp.now().normalize()
 
@@ -64,10 +63,11 @@ def run(
         t0         = time.time()
         virtual_ts = ts + pd.Timedelta(minutes=15 * i)
 
-        # Set virtual timestamp so sim_apply_fn uses the right traffic profile
+        # Set virtual timestamp so all sim calls use the right traffic profile
         set_virtual_ts(virtual_ts)
 
-        kpis        = get_current_kpis(scenario, timestamp=virtual_ts)
+        # Get current network state including accumulated sleep history
+        _, kpis = sim_test_fn([])
         kpi_summary = _kpi_to_text_viavi(kpis)
 
         proposed, planner_raw, t_plan = plan(
