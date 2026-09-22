@@ -247,9 +247,12 @@ def make_sim_fns(scenario):
 
                 # Replay accumulated sleep state so each fresh simulation starts from
                 # the current network configuration, not a clean slate.
+                # Small delay between commands avoids 409 CONFLICT from the SBA
+                # endpoint when many cells need to be replayed simultaneously.
                 for cell_name, is_sleeping in cell_sleep_state.items():
                     cmd = "turn_off" if is_sleeping else "turn_on"
                     sim.command(cmd, cell=cell_name, reason="accumulated state")
+                    _time.sleep(0.15)
 
                 # Apply new actions for this iteration
                 for a in (actions or []):
