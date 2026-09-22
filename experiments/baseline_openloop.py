@@ -53,7 +53,7 @@ def run(
     condition_name: str = "baseline_openloop",
 ) -> list[dict]:
     llm = get_llm()
-    _, sim_apply_fn = make_sim_fns(scenario)
+    _, sim_apply_fn, _ = make_sim_fns(scenario)
 
     ts = pd.Timestamp.now().normalize()  # start of today; iterations advance virtually
 

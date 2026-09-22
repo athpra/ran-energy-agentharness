@@ -2,7 +2,7 @@
 set -e
 
 ITER=${ITER:-96}
-INTENT=${INTENT:-"5 Mbps"}
+INTENT=${INTENT:-"3 Mbps"}
 
 echo "Starting full VTZ-cycle experiment run: iterations=$ITER  intent='$INTENT'"
 echo ""

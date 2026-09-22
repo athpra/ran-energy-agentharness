@@ -1,22 +1,16 @@
 """
-Baseline C — Digital twin only, continuous VTZ-cycle variant.
+Baseline C — Digital twin only, VTZ-cycle variant.
 
 Dual-LLM closed loop (Planner + Validator) with VIAVI AI RSG but NO
 additional tool context (no historical KPI, forecasts, faults, etc.).
 Uses the blueprint's original PRB-12% system prompt.
 
-This is the VTZ-cycle equivalent of baseline_digital_twin.py: the
-simulation runs continuously so VIAVI's internal VTZ clock cycles through
-Night / Morning / Evening traffic profiles, producing dynamic throughput
-variation rather than a static network state.
-
-Note on Sim-1 semantics: in continuous mode sim_test_fn returns the
-pre-action KPI state (current network before proposed changes) as the
-Validator's evidence.  This is consistent with the other *_vtzcycle
-variants and avoids the probe-then-undo complexity.
+The virtual timestamp advances 15 minutes per iteration so traffic profiles
+(UE counts) cycle through Night / Morning / Evening across 96 iterations,
+giving the Validator varying network conditions to reason about.
 
 Run:
-    python experiments/baseline_digital_twin_vtzcycle.py --intent "5 Mbps" --iterations 96
+    python experiments/baseline_digital_twin_vtzcycle.py --intent "3 Mbps" --iterations 96
 """
 from __future__ import annotations
 
@@ -30,9 +24,10 @@ from agent.planner  import BLUEPRINT_SYSTEM_PROMPT
 from experiments.common import (
     apply_job_arguments,
     connect_scenario,
+    get_current_kpis,
     get_llm,
     make_run_dir,
-    make_sim_fns_continuous,
+    make_sim_fns,
     save_results,
     append_result,
     _kpi_to_text_viavi,
@@ -47,7 +42,7 @@ def run(
     run_dir=None,
 ) -> list[dict]:
     llm = get_llm()
-    advance_step, sim_test_fn, sim_apply_fn, finish_sim = make_sim_fns_continuous(scenario)
+    sim_test_fn, sim_apply_fn, set_virtual_ts = make_sim_fns(scenario)
 
     harness = AgentHarness(
         llm=llm,
@@ -63,7 +58,11 @@ def run(
     for i in range(n_iterations):
         virtual_ts = ts + pd.Timedelta(minutes=15 * i)
 
-        kpis = advance_step()
+        # Set virtual timestamp so sim_test_fn / sim_apply_fn use the right traffic profile
+        set_virtual_ts(virtual_ts)
+
+        # Get current network state at this virtual time
+        kpis = get_current_kpis(scenario, timestamp=virtual_ts)
 
         site_keys   = sorted(kpis["per_site"].keys())
         cell_ids    = list(range(len(site_keys)))
@@ -71,7 +70,6 @@ def run(
         kpi_summary = _kpi_to_text_viavi(kpis)
 
         # Blueprint PRB rule: N1_PRB < 12 % → sleep candidate (mirrors blueprint SQL).
-        # Passed as static fallback in case the LLM planner returns [].
         sleep_cands = [
             j for j, k in enumerate(site_keys)
             if not kpis["per_site"][k]["n1_sleeping"]
@@ -101,8 +99,6 @@ def run(
         if run_dir is not None:
             append_result(run_dir, r_dict)
 
-    finish_sim()
-
     summary = harness.summary()
     for r in summary:
         r["condition"] = condition_name
@@ -112,9 +108,9 @@ def run(
 def main():
     apply_job_arguments()
     parser = argparse.ArgumentParser(
-        description="Baseline C: digital twin only — continuous VTZ-cycle variant"
+        description="Baseline C: digital twin only — VTZ-cycle variant"
     )
-    parser.add_argument("--intent",     default="5 Mbps")
+    parser.add_argument("--intent",     default="3 Mbps")
     parser.add_argument("--iterations", type=int, default=int(os.environ.get("ITER", 96)))
     parser.add_argument("--rsg-host",   default=os.getenv("RSG_HOST", ""))
     args, _ = parser.parse_known_args()

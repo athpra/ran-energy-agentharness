@@ -1,17 +1,17 @@
 """
-Full agent harness — continuous VTZ-cycle variant.
+Full agent harness — VTZ-cycle variant.
 
-Runs ONE VIAVI simulation for the full experiment duration.  VIAVI's internal
-Virtual Time Zone (VTZ) model advances through Night / Morning / Evening
-traffic profiles automatically, producing the dynamic throughput variation that
-makes the closed-loop safety mechanism meaningful.
+Each iteration runs with a virtual timestamp advanced by 15 minutes, covering a
+full 24-hour traffic cycle across 96 iterations.  The traffic profile (UE count)
+for every simulation is selected from the virtual clock — Night / Morning /
+Evening etc. — so KPIs vary meaningfully across iterations rather than staying
+fixed at whatever the wall-clock hour happens to be.
 
-Compare with full_harness.py, which restarted the simulation for every
-iteration and never benefited from VTZ cycling (all 96 iterations saw the
-same static traffic state).
+Dual-LLM closed loop (Planner + Validator) with VIAVI AI RSG +
+all five additional tools active.
 
 Run:
-    python experiments/full_harness_vtzcycle.py --intent "5 Mbps" --iterations 96
+    python experiments/full_harness_vtzcycle.py --intent "3 Mbps" --iterations 96
 """
 from __future__ import annotations
 
@@ -25,9 +25,10 @@ from agent.context import ALL_TOOLS
 from experiments.common import (
     apply_job_arguments,
     connect_scenario,
+    get_current_kpis,
     get_llm,
     make_run_dir,
-    make_sim_fns_continuous,
+    make_sim_fns,
     save_results,
     append_result,
     _kpi_to_text_viavi,
@@ -43,7 +44,7 @@ def run(
     run_dir=None,
 ) -> list[dict]:
     llm = get_llm()
-    advance_step, sim_test_fn, sim_apply_fn, finish_sim = make_sim_fns_continuous(scenario)
+    sim_test_fn, sim_apply_fn, set_virtual_ts = make_sim_fns(scenario)
 
     harness = AgentHarness(
         llm=llm,
@@ -53,13 +54,16 @@ def run(
         enabled_tools=enabled_tools,
     )
 
-    ts = pd.Timestamp.now().normalize()  # midnight today; used for tool context timestamps
+    ts = pd.Timestamp.now().normalize()  # midnight today; iterations advance virtually
 
     for i in range(n_iterations):
         virtual_ts = ts + pd.Timedelta(minutes=15 * i)
 
-        # Advance VIAVI VTZ clock one 15-minute step; get pre-action KPIs
-        kpis = advance_step()
+        # Set virtual timestamp so sim_test_fn / sim_apply_fn use the right traffic profile
+        set_virtual_ts(virtual_ts)
+
+        # Get current network state at this virtual time
+        kpis = get_current_kpis(scenario, timestamp=virtual_ts)
 
         site_keys   = sorted(kpis["per_site"].keys())
         cell_ids    = list(range(len(site_keys)))
@@ -75,7 +79,7 @@ def run(
         )
         r_dict = result.to_dict()
         r_dict["condition"]   = condition_name
-        r_dict["kpi_summary"] = kpi_summary  # pre-action state, used by eval extractors
+        r_dict["kpi_summary"] = kpi_summary
 
         print(
             f"  [iter {i+1:>3}] proposed={len(result.proposed_actions)}  "
@@ -88,8 +92,6 @@ def run(
         if run_dir is not None:
             append_result(run_dir, r_dict)
 
-    finish_sim()
-
     summary = harness.summary()
     for r in summary:
         r["condition"] = condition_name
@@ -99,9 +101,9 @@ def run(
 def main():
     apply_job_arguments()
     parser = argparse.ArgumentParser(
-        description="Full agent harness — continuous VTZ-cycle variant"
+        description="Full agent harness — VTZ-cycle variant"
     )
-    parser.add_argument("--intent",     default="5 Mbps")
+    parser.add_argument("--intent",     default="3 Mbps")
     parser.add_argument("--iterations", type=int, default=int(os.environ.get("ITER", 96)))
     parser.add_argument("--rsg-host",   default=os.getenv("RSG_HOST", ""))
     parser.add_argument(

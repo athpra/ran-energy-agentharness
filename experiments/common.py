@@ -186,12 +186,16 @@ def _compute_kpis(sim_ue: pd.DataFrame, sim_cell: pd.DataFrame) -> dict:
 
 def make_sim_fns(scenario):
     """
-    Return (sim_test_fn, sim_apply_fn).
+    Return (sim_test_fn, sim_apply_fn, set_virtual_ts).
 
-    Both functions have signature:
+    Both sim functions have signature:
         fn(actions: list[dict]) -> (summary_str, kpi_dict)
 
-    where each action is {"action": "sleep"|"wake", "cell_id": int, ...}
+    set_virtual_ts(ts: pd.Timestamp) updates the timestamp used to select the
+    traffic profile for the next sim run.  Call it once per iteration before
+    the harness runs, so UE counts track the virtual 24-hour cycle rather than
+    the wall clock (which would always return the same profile for a run that
+    completes within a single hour).
 
     Internally:
     - cell_id integers are mapped to VIAVI full cell names ("Site/N1/Sector")
@@ -200,11 +204,16 @@ def make_sim_fns(scenario):
       every simulation — the SDK is stateless, so we must reapply history.
     - sim_test_fn does NOT update accumulated state (probe only).
     - sim_apply_fn DOES update accumulated state (confirmed actions).
-    - Traffic profile (UE count) is set from current wall-clock time.
+    - Traffic profile (UE count) is set from current_vts (set via set_virtual_ts).
     """
     cell_sleep_state:   dict[str, bool]       = {}   # cell_name -> is_sleeping
     cell_name_map:      dict[int, str]         = {}   # int id -> full VIAVI name
     original_ue_dist:   list[list[int]]        = []   # cached from scenario config
+    current_vts:        list                   = [None]  # mutable slot for virtual ts
+
+    def set_virtual_ts(ts: pd.Timestamp) -> None:
+        """Update the virtual timestamp used to select the traffic profile."""
+        current_vts[0] = ts
 
     def _cache_ue_dist() -> list[list[int]]:
         if not original_ue_dist:
@@ -223,7 +232,8 @@ def make_sim_fns(scenario):
     def _run(actions: list[dict], update_state: bool) -> tuple[str, dict]:
         import time as _time
 
-        profile = _get_profile(pd.Timestamp.now())
+        ts = current_vts[0] if current_vts[0] is not None else pd.Timestamp.now()
+        profile = _get_profile(ts)
         _apply_profile(profile)
 
         scenario.config["System"]["batch_mode"] = True
@@ -304,7 +314,34 @@ def make_sim_fns(scenario):
     _run([], update_state=False)
     print(f"Cell map ready: {len(cell_name_map)} N1 cells found.")
 
-    return sim_test_fn, sim_apply_fn
+    # Validate VTZ traffic variation: confirm that force_start picks up
+    # scenario.config mutations so UE counts actually change per profile.
+    # Uses Night (02:00, ue_ratio=0.1) vs Morning (09:00, ue_ratio=1.0).
+    # If force_start re-reads the disk config, both sims return identical
+    # throughput and we print a clear warning so the issue is obvious.
+    print("Validating VTZ traffic variation (Night vs Morning)...")
+    _today = pd.Timestamp.now().normalize()
+    current_vts[0] = _today + pd.Timedelta(hours=2)   # 02:00 Night   (0.1×)
+    _, _night_kpis   = _run([], update_state=False)
+    current_vts[0] = _today + pd.Timedelta(hours=9)   # 09:00 Morning (1.0×)
+    _, _morning_kpis = _run([], update_state=False)
+    current_vts[0] = None  # reset; caller sets it via set_virtual_ts each iteration
+
+    _night_thp   = _night_kpis.get("avg_throughput_mbps", 0)
+    _morning_thp = _morning_kpis.get("avg_throughput_mbps", 0)
+    if _morning_thp > _night_thp * 1.5:
+        print(
+            f"VTZ variation confirmed: Night={_night_thp:.2f} Mbps → Morning={_morning_thp:.2f} Mbps  "
+            f"(ratio={_morning_thp / max(_night_thp, 0.001):.1f}×)"
+        )
+    else:
+        print(
+            f"WARNING: VTZ variation NOT detected. Night={_night_thp:.2f} Mbps, "
+            f"Morning={_morning_thp:.2f} Mbps — force_start may be re-reading the "
+            f"disk config and discarding scenario.config UE-count mutations."
+        )
+
+    return sim_test_fn, sim_apply_fn, set_virtual_ts
 
 
 # ── Continuous VTZ-cycle simulation ──────────────────────────────────────────

@@ -28,7 +28,7 @@ def run(
     condition_name: str = "baseline_digital_twin",
 ) -> list[dict]:
     llm                       = get_llm()
-    sim_test_fn, sim_apply_fn = make_sim_fns(scenario)
+    sim_test_fn, sim_apply_fn, _ = make_sim_fns(scenario)
 
     harness = AgentHarness(
         llm=llm,

@@ -1,12 +1,12 @@
 """
-Baseline B — Open-loop LLM, continuous VTZ-cycle variant.
+Baseline B — Open-loop LLM, VTZ-cycle variant.
 
-Same aggressive planner as baseline_openloop.py but runs a SINGLE continuous
-VIAVI simulation so the VTZ traffic model cycles naturally.  This gives an
-apples-to-apples comparison with full_harness_vtzcycle.py.
+Same aggressive planner as baseline_openloop.py but the virtual timestamp
+advances 15 minutes per iteration so traffic profiles (UE counts) cycle through
+Night / Morning / Evening across 96 iterations.
 
 Run:
-    python experiments/baseline_openloop_vtzcycle.py --intent "5 Mbps" --iterations 96
+    python experiments/baseline_openloop_vtzcycle.py --intent "3 Mbps" --iterations 96
 """
 from __future__ import annotations
 
@@ -20,9 +20,10 @@ from agent.planner import plan
 from experiments.common import (
     apply_job_arguments,
     connect_scenario,
+    get_current_kpis,
     get_llm,
     make_run_dir,
-    make_sim_fns_continuous,
+    make_sim_fns,
     save_results,
     append_result,
     _kpi_to_text_viavi,
@@ -54,16 +55,19 @@ def run(
     run_dir=None,
 ) -> list[dict]:
     llm = get_llm()
-    advance_step, _, sim_apply_fn, finish_sim = make_sim_fns_continuous(scenario)
+    _, sim_apply_fn, set_virtual_ts = make_sim_fns(scenario)
 
     ts = pd.Timestamp.now().normalize()
 
     results = []
     for i in range(n_iterations):
         t0         = time.time()
-        virtual_ts = ts + pd.Timedelta(minutes=15 * i)  # noqa: F841 (kept for symmetry)
+        virtual_ts = ts + pd.Timedelta(minutes=15 * i)
 
-        kpis        = advance_step()
+        # Set virtual timestamp so sim_apply_fn uses the right traffic profile
+        set_virtual_ts(virtual_ts)
+
+        kpis        = get_current_kpis(scenario, timestamp=virtual_ts)
         kpi_summary = _kpi_to_text_viavi(kpis)
 
         proposed, planner_raw, t_plan = plan(
@@ -124,16 +128,15 @@ def run(
         if run_dir is not None:
             append_result(run_dir, r)
 
-    finish_sim()
     return results
 
 
 def main():
     apply_job_arguments()
     parser = argparse.ArgumentParser(
-        description="Baseline B: open-loop LLM — continuous VTZ-cycle variant"
+        description="Baseline B: open-loop LLM — VTZ-cycle variant"
     )
-    parser.add_argument("--intent",     default="5 Mbps")
+    parser.add_argument("--intent",     default="3 Mbps")
     parser.add_argument("--iterations", type=int, default=int(os.environ.get("ITER", 96)))
     parser.add_argument("--rsg-host",   default=os.getenv("RSG_HOST", ""))
     args, _ = parser.parse_known_args()
