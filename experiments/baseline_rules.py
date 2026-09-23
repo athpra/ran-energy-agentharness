@@ -86,11 +86,12 @@ def run(
         }
         actions = rule_policy(cell_kpis, sleep_threshold_pct, n12_wake_threshold_pct)
 
-        # Apply actions into the new traffic window
+        # Apply actions into the new traffic window.
+        # Always call sim_apply_fn (even with []) so post_kpis reflects the
+        # current virtual_ts traffic load — not the observation window's load.
+        # With [] it reads state without changing sleep configuration.
         set_virtual_ts(virtual_ts)
-        sim_summary, post_kpis = sim_apply_fn(actions) if actions else (
-            "No actions — nothing applied.", {}
-        )
+        sim_summary, post_kpis = sim_apply_fn(actions)
 
         post_tp  = post_kpis.get("avg_throughput_mbps") or kpis.get("avg_throughput_mbps", 0)
         sleeping = post_kpis.get("sleeping_cells", kpis.get("sleeping_cells", 0))
