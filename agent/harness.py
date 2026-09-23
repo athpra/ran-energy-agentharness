@@ -86,8 +86,10 @@ class AgentHarness:
         operator_intent: str,
         enabled_tools: frozenset[str] = ALL_TOOLS,
         planner_system_prompt: str | None = None,
+        validator_llm: ChatOpenAI | None = None,
     ):
         self.llm                    = llm
+        self.validator_llm          = validator_llm or llm
         self.sim_test_fn            = sim_test_fn
         self.sim_apply_fn           = sim_apply_fn
         self.operator_intent        = operator_intent
@@ -183,7 +185,7 @@ class AgentHarness:
             sim_result_summary=sim1_summary,
             operator_intent=self.operator_intent,
             tool_context_block=tool_block,
-            llm=self.llm,
+            llm=self.validator_llm,
         )
         # Veto-only semantics: approved = proposed minus explicitly rejected.
         # This is robust against the model omitting safe actions from "approved".

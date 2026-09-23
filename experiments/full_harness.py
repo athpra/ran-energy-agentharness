@@ -39,9 +39,11 @@ def run(
     enabled_tools: frozenset[str] = ALL_TOOLS,
     condition_name: str = "full_harness",
     model: str | None = None,
+    validator_model: str | None = None,
     run_dir=None,
 ) -> list[dict]:
-    llm                       = get_llm(model)
+    llm           = get_llm(model)
+    validator_llm = get_llm(validator_model) if validator_model else None
     sim_test_fn, sim_apply_fn, _ = make_sim_fns(scenario)
 
     harness = AgentHarness(
@@ -50,6 +52,7 @@ def run(
         sim_apply_fn=sim_apply_fn,
         operator_intent=operator_intent,
         enabled_tools=enabled_tools,
+        validator_llm=validator_llm,
     )
 
     ts = pd.Timestamp.now().normalize()  # start of today; iterations advance virtually
@@ -95,8 +98,9 @@ def main():
     parser.add_argument("--iterations", type=int, default=int(os.environ.get("ITER", 96)))
     parser.add_argument("--rsg-host",   default=os.getenv("RSG_HOST", ""))
     parser.add_argument("--model",      default=None,
-                        help="LLM model ID override (e.g. nvidia/nemotron-3-super-120b-a12b). "
-                             "Defaults to LLM_MODEL env var.")
+                        help="Planner model ID. Defaults to LLM_MODEL env var.")
+    parser.add_argument("--validator-model", default=None,
+                        help="Validator model ID. Defaults to --model when omitted.")
     parser.add_argument(
         "--tools", nargs="*", default=list(ALL_TOOLS),
         choices=list(ALL_TOOLS),
@@ -111,10 +115,13 @@ def main():
 
     scenario = connect_scenario(args.rsg_host)
 
+    val_slug = args.validator_model.split("/")[-1] if args.validator_model else model_slug
+
     run_dir = make_run_dir(label, model_slug)
-    print(f"Running: {condition}  tools={sorted(enabled)}  intent='{args.intent}'  iterations={args.iterations}")
+    print(f"Running: {condition}  planner={model_slug}  validator={val_slug}  tools={sorted(enabled)}  intent='{args.intent}'  iterations={args.iterations}")
     print(f"Saving incrementally to: {run_dir}")
-    results = run(scenario, args.intent, args.iterations, enabled, condition, args.model, run_dir=run_dir)
+    results = run(scenario, args.intent, args.iterations, enabled, condition, args.model,
+                  args.validator_model, run_dir=run_dir)
     save_results(run_dir, results)
 
 
