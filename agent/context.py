@@ -151,7 +151,17 @@ def assemble(
         }
         blocked |= interference_blocked
 
-        sleep_candidates = sorted(cid for cid in cell_ids if cid not in blocked)
+        # Only cells whose current N1_PRB is genuinely low are sleep candidates.
+        # Tool signals (fault, forecast, interference) can only further restrict
+        # this set — not expand it. Without a PRB gate, cold cells appear as
+        # candidates even during peak traffic, causing the Planner to propose
+        # sleeps that degrade QoS.
+        _PRB_SLEEP_THRESHOLD = 12.0
+        sleep_candidates = sorted(
+            cid for cid in cell_ids
+            if cid not in blocked
+            and current_utilization.get(cid, 100.0) < _PRB_SLEEP_THRESHOLD
+        )
         ctx["sleep_candidates"] = sleep_candidates
 
         # Proactive wake candidates: sleeping cells that should wake before a surge.
@@ -162,7 +172,7 @@ def assemble(
 
         lines.append("### Pre-computed Action Guidance")
         lines.append(f"Blocked cells (faults/forecast/interference): {sorted(blocked)}")
-        lines.append(f"SLEEP these cells (Awake, N1_PRB low, all signals clear): {sleep_candidates}")
+        lines.append(f"SLEEP these cells (Awake, N1_PRB < {_PRB_SLEEP_THRESHOLD:.0f}%, all tool signals clear): {sleep_candidates}")
         if wake_candidates:
             lines.append(
                 f"WAKE these cells (Sleeping, surge in t+{surge_step}): {wake_candidates}"
