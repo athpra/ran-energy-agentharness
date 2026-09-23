@@ -135,6 +135,12 @@ def run(
             sim_apply_fn(proposed) if proposed else ("No actions proposed.", {})
         )
 
+        intent_mbps = float(operator_intent.split()[0])
+        post_tp  = post_kpis.get("avg_throughput_mbps") or kpis.get("avg_throughput_mbps", 0)
+        sleeping = post_kpis.get("sleeping_cells", kpis.get("sleeping_cells", 0))
+        total    = post_kpis.get("total_cells",    kpis.get("total_cells",    42))
+        violated = post_tp < intent_mbps
+
         r = {
             "iteration":         i + 1,
             "condition":         condition_name,
@@ -150,12 +156,13 @@ def run(
             "kpi_summary":       kpi_summary,
             "sim2_summary":      sim_summary,
             "post_kpis":         post_kpis,
+            "qos_violated":      violated,
             "total_elapsed_s":   round(time.time() - t0, 3),
         }
+        qos_tag = "✗ QoS VIOLATION" if violated else "✓"
         print(
             f"  [iter {i+1:>3}] proposed={len(proposed)}  "
-            f"tp={kpis.get('avg_throughput_mbps', 0):.2f} Mbps  "
-            f"sleeping={kpis.get('sleeping_cells', 0)}/{kpis.get('total_cells', 0)}"
+            f"tp={post_tp:.2f} Mbps  sleeping={sleeping}/{total}  {qos_tag}"
         )
         results.append(r)
         if run_dir is not None:

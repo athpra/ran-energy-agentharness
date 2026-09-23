@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from experiments.common import get_current_kpis, make_run_dir, save_results, apply_job_arguments
+from experiments.common import make_run_dir, save_results, apply_job_arguments
 
 
 def rule_policy(
@@ -45,21 +45,25 @@ def run(
     wake_threshold_pct:  float = 30.0,
     condition_name: str  = "baseline_rules",
 ) -> list[dict]:
-    from experiments.common import make_sim_fns
-    _, sim_apply_fn = make_sim_fns(scenario)
+    from experiments.common import make_sim_fns, _kpi_to_text_viavi
+    sim_test_fn, sim_apply_fn, set_virtual_ts = make_sim_fns(scenario)
 
-    ts = pd.Timestamp.now().normalize()  # start of today; iterations advance virtually
+    intent_mbps = float(operator_intent.split()[0])
+    ts = pd.Timestamp.now().normalize()
 
     results = []
     for i in range(n_iterations):
         t0         = time.time()
         virtual_ts = ts + pd.Timedelta(minutes=15 * i)
-        raw        = get_current_kpis(scenario, timestamp=virtual_ts)
-        sk      = sorted(raw["per_site"].keys())
+        set_virtual_ts(virtual_ts)
+
+        # Read current state including accumulated sleep history
+        _, kpis = sim_test_fn([])
+        sk = sorted(kpis["per_site"].keys())
         cell_kpis = {
             j: {
-                "utilization_pct": raw["per_site"][k]["n1_prb"],
-                "sleep_state":     1 if raw["per_site"][k]["n1_sleeping"] else 0,
+                "utilization_pct": kpis["per_site"][k]["n1_prb"],
+                "sleep_state":     1 if kpis["per_site"][k]["n1_sleeping"] else 0,
             }
             for j, k in enumerate(sk)
         }
@@ -68,6 +72,11 @@ def run(
         sim_summary, post_kpis = sim_apply_fn(actions) if actions else (
             "No actions — nothing applied.", {}
         )
+
+        post_tp  = post_kpis.get("avg_throughput_mbps") or kpis.get("avg_throughput_mbps", 0)
+        sleeping = post_kpis.get("sleeping_cells", kpis.get("sleeping_cells", 0))
+        total    = post_kpis.get("total_cells",    kpis.get("total_cells",    42))
+        violated = post_tp < intent_mbps
 
         results.append({
             "iteration":         i + 1,
@@ -81,9 +90,14 @@ def run(
             "n_rejected":        0,
             "sim2_summary":      sim_summary,
             "post_kpis":         post_kpis,
+            "qos_violated":      violated,
             "total_elapsed_s":   round(time.time() - t0, 3),
         })
-        print(f"  [iter {i+1:>3}] actions={len(actions)}  {sim_summary[:80]}")
+        qos_tag = "✗ QoS VIOLATION" if violated else "✓"
+        print(
+            f"  [iter {i+1:>3}] actions={len(actions)}  "
+            f"tp={post_tp:.2f} Mbps  sleeping={sleeping}/{total}  {qos_tag}"
+        )
 
     return results
 
