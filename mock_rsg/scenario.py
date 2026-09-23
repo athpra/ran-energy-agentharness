@@ -61,7 +61,14 @@ _CELL_LOAD_FACTORS = [
 assert len(_CELL_LOAD_FACTORS) == len(_N1_NAMES)
 
 # Per-UE throughput noise (±σ fraction of mean)
+# Per-UE throughput noise (±σ fraction of mean)
 _TP_NOISE_FRAC = 0.06
+
+# Simulation-level load jitter: models stochastic UE arrival variation within
+# a 10-second window.  Applied once per MockSimulation instance so Sim-1 and
+# Sim-2 see different effective loads — making near-threshold proposals
+# genuinely uncertain rather than always returning the same value.
+_LOAD_JITTER_FRAC = 0.12
 
 
 def _tp_per_ue(n_ues: int, n_awake_n1: int) -> float:
@@ -105,11 +112,16 @@ class MockSimulation:
 
     def __init__(self, sim_id: str, n_ues: int) -> None:
         self._id       = sim_id
-        self._n_ues    = n_ues
         self._sleeping: set[str] = set()   # N1 cell names currently off
         self._t        = 0                  # simulated seconds elapsed
         self._pause_no = 0
         self._rng      = random.Random(sim_id)
+        # Stochastic load: models UE arrival variance within the simulation window.
+        # Each sim instance gets a different effective UE count so Sim-1 / Sim-2
+        # diverge slightly, giving the Validator genuine uncertainty on proposals
+        # that sit near the QoS threshold.
+        jitter = self._rng.gauss(1.0, _LOAD_JITTER_FRAC)
+        self._n_ues = max(1, int(n_ues * jitter))
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
