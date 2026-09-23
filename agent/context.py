@@ -157,9 +157,11 @@ def assemble(
         # candidates even during peak traffic, causing the Planner to propose
         # sleeps that degrade QoS.
         _PRB_SLEEP_THRESHOLD = 12.0
+        _sleeping_set = set(sleeping_cell_ids or [])
         sleep_candidates = sorted(
             cid for cid in cell_ids
             if cid not in blocked
+            and cid not in _sleeping_set
             and current_utilization.get(cid, 100.0) < _PRB_SLEEP_THRESHOLD
         )
         ctx["sleep_candidates"] = sleep_candidates
