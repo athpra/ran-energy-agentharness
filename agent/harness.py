@@ -126,6 +126,17 @@ class AgentHarness:
             system_prompt=self.planner_system_prompt,
         )
 
+        # Strip invalid LLM actions: sleep on already-sleeping cells and wake on
+        # already-awake cells are no-ops that inflate n_proposed and confuse the
+        # Validator.  sleeping_cell_ids is the ground truth for current state.
+        if proposed and sleeping_cell_ids is not None:
+            sleeping_set = set(sleeping_cell_ids)
+            proposed = [
+                a for a in proposed
+                if (a["action"] == "sleep" and a["cell_id"] not in sleeping_set)
+                or (a["action"] == "wake"  and a["cell_id"]     in sleeping_set)
+            ]
+
         # Fallback: if the LLM proposes nothing but candidates are available
         # (from tool pre-analysis for full_harness, or from static PRB rules for
         # baseline_digital_twin), use those directly.
