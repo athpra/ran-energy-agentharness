@@ -54,6 +54,21 @@ def generate(
                 remaining -= 1
                 if remaining <= 0:
                     active = False
+                    # Emit a resolution record so the tool's "latest row" lookup
+                    # returns active=False once the fault window ends.
+                    last = next(
+                        (r for r in reversed(rows) if r["cell_id"] == int(cell_id)), None
+                    )
+                    resolved_type = last["fault_type"] if last else rng.choice(FAULT_TYPES)
+                    rows.append(
+                        {
+                            "timestamp": ts,
+                            "cell_id":   int(cell_id),
+                            "fault_type": resolved_type,
+                            "severity":  FAULT_SEVERITY[resolved_type],
+                            "active":    False,
+                        }
+                    )
             elif rng.random() < fault_probability:
                 active    = True
                 remaining = int(rng.geometric(p=1.0 / mean_duration_intervals))

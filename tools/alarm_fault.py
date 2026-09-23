@@ -36,8 +36,13 @@ def query(
     df = _load(str(data_path))
     ts = pd.Timestamp(timestamp)
 
-    # Use the most recent fault record at or before the requested timestamp
-    df = df[df["timestamp"] <= ts]
+    # Normalise to the CSV's reference date so time-of-day lookup works
+    # regardless of the virtual timestamp's calendar date.
+    ref_date = df["timestamp"].iloc[0].normalize()
+    ts_norm  = ref_date + pd.Timedelta(hours=ts.hour, minutes=ts.minute)
+
+    # Use the most recent fault record at or before the normalised timestamp
+    df = df[df["timestamp"] <= ts_norm]
 
     if cell_id is not None:
         df = df[df["cell_id"] == cell_id]
