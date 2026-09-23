@@ -24,16 +24,27 @@ from experiments.common import make_run_dir, save_results, apply_job_arguments
 def rule_policy(
     cell_kpis: dict[int, dict],
     sleep_threshold_pct: float = 15.0,
-    wake_threshold_pct:  float = 30.0,
+    n12_wake_threshold_pct: float = 60.0,
 ) -> list[dict]:
+    """
+    Sleep: awake N1 cell with N1_PRB < sleep_threshold_pct.
+    Wake:  sleeping N1 cell whose N12 neighbor PRB > n12_wake_threshold_pct.
+
+    N1_PRB of a sleeping cell is always 0% so it can never trigger a wake.
+    The correct signal is N12 load — when displaced UEs overload the fallback
+    layer, the sleeping N1 cell should be restored.
+    """
     actions = []
     for cid, k in cell_kpis.items():
-        util  = k.get("utilization_pct", 0)
-        sleep = k.get("sleep_state", 0)
-        if sleep == 0 and util < sleep_threshold_pct:
-            actions.append({"action": "sleep", "cell_id": cid, "reason": f"util={util:.1f}% < threshold"})
-        elif sleep == 1 and util > wake_threshold_pct:
-            actions.append({"action": "wake",  "cell_id": cid, "reason": f"util={util:.1f}% > threshold"})
+        n1_prb  = k.get("utilization_pct", 0)
+        n12_prb = k.get("n12_prb", 0)
+        sleeping = k.get("sleep_state", 0)
+        if not sleeping and n1_prb < sleep_threshold_pct:
+            actions.append({"action": "sleep", "cell_id": cid,
+                            "reason": f"N1_PRB={n1_prb:.1f}% < {sleep_threshold_pct:.0f}%"})
+        elif sleeping and n12_prb > n12_wake_threshold_pct:
+            actions.append({"action": "wake", "cell_id": cid,
+                            "reason": f"N12_PRB={n12_prb:.1f}% > {n12_wake_threshold_pct:.0f}%"})
     return actions
 
 
@@ -41,9 +52,9 @@ def run(
     scenario,
     operator_intent: str,
     n_iterations: int,
-    sleep_threshold_pct: float = 15.0,
-    wake_threshold_pct:  float = 30.0,
-    condition_name: str  = "baseline_rules",
+    sleep_threshold_pct:    float = 15.0,
+    n12_wake_threshold_pct: float = 60.0,
+    condition_name: str     = "baseline_rules",
 ) -> list[dict]:
     from experiments.common import make_sim_fns, _kpi_to_text_viavi
     sim_test_fn, sim_apply_fn, set_virtual_ts = make_sim_fns(scenario)
@@ -63,11 +74,12 @@ def run(
         cell_kpis = {
             j: {
                 "utilization_pct": kpis["per_site"][k]["n1_prb"],
+                "n12_prb":         kpis["per_site"][k]["n12_prb"],
                 "sleep_state":     1 if kpis["per_site"][k]["n1_sleeping"] else 0,
             }
             for j, k in enumerate(sk)
         }
-        actions = rule_policy(cell_kpis, sleep_threshold_pct, wake_threshold_pct)
+        actions = rule_policy(cell_kpis, sleep_threshold_pct, n12_wake_threshold_pct)
 
         sim_summary, post_kpis = sim_apply_fn(actions) if actions else (
             "No actions — nothing applied.", {}
@@ -107,16 +119,17 @@ def main():
     parser = argparse.ArgumentParser(description="Baseline A: rule-based policy")
     parser.add_argument("--intent",       default="5 Mbps")
     parser.add_argument("--iterations",   type=int,   default=20)
-    parser.add_argument("--sleep-thresh", type=float, default=15.0)
-    parser.add_argument("--wake-thresh",  type=float, default=30.0)
-    parser.add_argument("--rsg-host",     default=os.getenv("RSG_HOST", ""))
+    parser.add_argument("--sleep-thresh",    type=float, default=15.0)
+    parser.add_argument("--n12-wake-thresh", type=float, default=60.0)
+    parser.add_argument("--rsg-host",        default=os.getenv("RSG_HOST", ""))
     args, _ = parser.parse_known_args()
 
     from experiments.common import connect_scenario
     scenario = connect_scenario(args.rsg_host)
 
     print(f"Running: baseline_rules  intent='{args.intent}'  iterations={args.iterations}")
-    results  = run(scenario, args.intent, args.iterations, args.sleep_thresh, args.wake_thresh)
+    results  = run(scenario, args.intent, args.iterations,
+                   args.sleep_thresh, args.n12_wake_thresh)
     run_dir  = make_run_dir("baseline_rules", "rules")
     save_results(run_dir, results)
 
