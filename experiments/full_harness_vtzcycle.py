@@ -18,6 +18,8 @@ from __future__ import annotations
 import argparse
 import os
 
+from dotenv import find_dotenv, load_dotenv
+
 import pandas as pd
 
 from agent.harness import AgentHarness
@@ -121,6 +123,7 @@ def run(
 
 
 def main():
+    load_dotenv(find_dotenv(), override=True)
     apply_job_arguments()
     parser = argparse.ArgumentParser(
         description="Full agent harness — VTZ-cycle variant"
