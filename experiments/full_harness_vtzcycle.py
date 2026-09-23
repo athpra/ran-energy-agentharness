@@ -28,6 +28,7 @@ from experiments.common import (
     apply_job_arguments,
     connect_scenario,
     get_llm,
+    get_validator_llm,
     make_run_dir,
     make_sim_fns,
     save_results,
@@ -47,7 +48,7 @@ def run(
     run_dir=None,
 ) -> list[dict]:
     llm           = get_llm(model)
-    validator_llm = get_llm(validator_model) if validator_model else None
+    validator_llm = get_validator_llm(validator_model)
     sim_test_fn, sim_apply_fn, set_virtual_ts = make_sim_fns(scenario)
 
     harness = AgentHarness(

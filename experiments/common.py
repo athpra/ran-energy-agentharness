@@ -42,7 +42,7 @@ def apply_job_arguments() -> None:
 
 # ── LLM factory ──────────────────────────────────────────────────────────────
 
-def get_llm(model: str | None = None) -> ChatOpenAI:
+def get_llm(model: str | None = None, api_base: str | None = None) -> ChatOpenAI:
     load_dotenv(find_dotenv(), override=True)
     auth_mode = os.getenv("AUTH_MODE", "jwt").strip().lower()
 
@@ -65,11 +65,26 @@ def get_llm(model: str | None = None) -> ChatOpenAI:
     return ChatOpenAI(
         model=(model or os.getenv("LLM_MODEL", "")).strip(),
         openai_api_key=api_key,
-        openai_api_base=os.getenv("CDSW_API_URL", "").strip(),
+        openai_api_base=(api_base or os.getenv("CDSW_API_URL", "")).strip(),
         temperature=0.1,
         max_tokens=4096,
         request_timeout=120,
     )
+
+
+def get_validator_llm(model: str | None = None, api_base: str | None = None) -> ChatOpenAI | None:
+    """Return a separate LLM for the Validator, or None if no validator config is set.
+
+    Reads VALIDATOR_MODEL and VALIDATOR_API_URL from .env.  CLI overrides
+    (model, api_base) take precedence.  Returns None when neither CLI nor env
+    provides a validator model, so the caller can fall back to the planner LLM.
+    """
+    load_dotenv(find_dotenv(), override=True)
+    resolved_model    = (model    or os.getenv("VALIDATOR_MODEL",   "")).strip()
+    resolved_api_base = (api_base or os.getenv("VALIDATOR_API_URL", "")).strip()
+    if not resolved_model:
+        return None
+    return get_llm(model=resolved_model, api_base=resolved_api_base or None)
 
 
 # ── VIAVI RSG connection ──────────────────────────────────────────────────────

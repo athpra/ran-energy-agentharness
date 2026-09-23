@@ -27,8 +27,8 @@ import pandas as pd
 from agent.harness   import AgentHarness
 from agent.context   import ALL_TOOLS
 from experiments.common import (
-    get_llm, get_current_kpis, connect_scenario, make_run_dir, save_results, append_result, make_sim_fns, _kpi_to_text,
-    apply_job_arguments,
+    get_llm, get_validator_llm, get_current_kpis, connect_scenario, make_run_dir,
+    save_results, append_result, make_sim_fns, _kpi_to_text, apply_job_arguments,
 )
 
 
@@ -43,7 +43,7 @@ def run(
     run_dir=None,
 ) -> list[dict]:
     llm           = get_llm(model)
-    validator_llm = get_llm(validator_model) if validator_model else None
+    validator_llm = get_validator_llm(validator_model)
     sim_test_fn, sim_apply_fn, _ = make_sim_fns(scenario)
 
     harness = AgentHarness(
