@@ -170,6 +170,18 @@ def assemble(
             wake_candidates = sorted(sleeping_cell_ids)
         ctx["wake_candidates"] = wake_candidates
 
+        # Structured per-tool blocking breakdown — serialized to JSONL so the
+        # analysis notebook can show which signal drove each decision.
+        ctx["tool_blocks"] = {
+            "fault_blocked":        sorted(fault_blocked),
+            "forecast_blocked":     sorted(forecast_blocked),
+            "interference_blocked": sorted(interference_blocked),
+            "sleep_candidates":     sleep_candidates,
+            "wake_candidates":      wake_candidates,
+            "surge_imminent":       surge_imminent,
+            "surge_step":           surge_step,
+        }
+
         lines.append("### Pre-computed Action Guidance")
         lines.append(f"Blocked cells (faults/forecast/interference): {sorted(blocked)}")
         lines.append(f"SLEEP these cells (Awake, N1_PRB < {_PRB_SLEEP_THRESHOLD:.0f}%, all tool signals clear): {sleep_candidates}")

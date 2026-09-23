@@ -66,10 +66,15 @@ def run(
     for i in range(n_iterations):
         t0         = time.time()
         virtual_ts = ts + pd.Timedelta(minutes=15 * i)
-        set_virtual_ts(virtual_ts)
 
-        # Read current state including accumulated sleep history
+        # Reactive system: observe the just-completed window, not the new one.
+        # This models a real controller that measures current PRBs/load before
+        # the next traffic period starts — creating a 1-iteration lag at surge
+        # transitions.  The full_harness eliminates this lag via the forecast tool.
+        obs_ts = virtual_ts - pd.Timedelta(minutes=15) if i > 0 else virtual_ts
+        set_virtual_ts(obs_ts)
         _, kpis = sim_test_fn([])
+
         sk = sorted(kpis["per_site"].keys())
         cell_kpis = {
             j: {
@@ -81,6 +86,8 @@ def run(
         }
         actions = rule_policy(cell_kpis, sleep_threshold_pct, n12_wake_threshold_pct)
 
+        # Apply actions into the new traffic window
+        set_virtual_ts(virtual_ts)
         sim_summary, post_kpis = sim_apply_fn(actions) if actions else (
             "No actions — nothing applied.", {}
         )
