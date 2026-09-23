@@ -27,6 +27,9 @@ def query(
     """
     Return current price and a horizon-step price forecast.
 
+    Lookup is time-of-day based so virtual timestamps (VTZ cycle) return the
+    correct tier regardless of what calendar date the virtual clock shows.
+
     Returns:
       - current_price_per_kwh (float)
       - current_tier          (str: off_peak | shoulder | peak)
@@ -35,17 +38,20 @@ def query(
     df = _load(str(data_path))
     ts = pd.Timestamp(timestamp)
 
-    # Current: nearest record at or before ts
-    past    = df[df["timestamp"] <= ts]
+    # Normalise to the CSV's reference date so time-of-day lookup works
+    # regardless of the virtual timestamp's calendar date.
+    ref_date = df["timestamp"].iloc[0].normalize()
+    ts_norm  = ref_date + pd.Timedelta(hours=ts.hour, minutes=ts.minute)
+
+    past    = df[df["timestamp"] <= ts_norm]
     current = past.iloc[-1] if not past.empty else df.iloc[0]
 
-    # Forecast: next `horizon` records after ts
-    future  = df[df["timestamp"] > ts].head(horizon)
+    future   = df[df["timestamp"] > ts_norm].head(horizon)
     forecast = [
         {
-            "step":             i + 1,
-            "price_per_kwh":    round(row.price_per_kwh, 4),
-            "tier":             row.tier,
+            "step":          i + 1,
+            "price_per_kwh": round(row.price_per_kwh, 4),
+            "tier":          row.tier,
         }
         for i, row in enumerate(future.itertuples())
     ]
