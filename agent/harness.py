@@ -61,6 +61,7 @@ class IterationResult:
             "timestamp":            str(self.timestamp),
             "tools_used":           self.tools_used,
             "tool_blocks":          self.tool_context.get("tool_blocks", {}),
+            "pricing_tier":         (self.tool_context.get("tool_blocks") or {}).get("pricing_tier", ""),
             "n_proposed":           len(self.proposed_actions),
             "n_approved":           len(self.approved_actions),
             "n_rejected":           len(self.rejected_actions),

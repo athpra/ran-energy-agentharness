@@ -172,6 +172,7 @@ def assemble(
 
         # Structured per-tool blocking breakdown — serialized to JSONL so the
         # analysis notebook can show which signal drove each decision.
+        pricing_data = ctx.get("energy_pricing", {})
         ctx["tool_blocks"] = {
             "fault_blocked":        sorted(fault_blocked),
             "forecast_blocked":     sorted(forecast_blocked),
@@ -180,6 +181,8 @@ def assemble(
             "wake_candidates":      wake_candidates,
             "surge_imminent":       surge_imminent,
             "surge_step":           surge_step,
+            "pricing_tier":         pricing_data.get("current_tier", ""),
+            "pricing_price":        pricing_data.get("current_price_per_kwh", None),
         }
 
         lines.append("### Pre-computed Action Guidance")

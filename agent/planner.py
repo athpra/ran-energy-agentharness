@@ -34,6 +34,17 @@ STEP 2 — Filter candidates by current KPI:
   - If N1_PRB > 50% AND the cell is currently Sleeping → add a wake action.
   - Otherwise → no action needed for that cell.
 
+STEP 2.5 — Apply energy pricing modifier (only if Energy pricing data is present):
+  Check current_tier in the Energy pricing section of the tool context:
+  - 'peak':     Electricity is expensive. Sleep ALL sleep candidates regardless of N1_PRB —
+                every sleeping cell maximises energy cost savings right now.
+                Include ALL candidates from STEP 2 in your output.
+                Include your reason: "peak pricing: maximising energy cost savings"
+  - 'shoulder': Apply normal thresholds from STEP 2. No modifier.
+  - 'off_peak': Electricity is cheap. Only sleep candidates with N1_PRB < 5% (very cold cells).
+                Skip candidates with 5% ≤ N1_PRB < 25% — savings are minimal at low prices.
+                Include your reason: "off_peak: conservative sleep, low cost savings"
+
 STEP 3 — Apply interference filter (only if interference data is present):
   Remove sleep actions where the interference data shows OVERLOAD RISK (not SAFE).
 
