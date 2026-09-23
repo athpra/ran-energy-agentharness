@@ -42,7 +42,7 @@ def apply_job_arguments() -> None:
 
 # ── LLM factory ──────────────────────────────────────────────────────────────
 
-def get_llm() -> ChatOpenAI:
+def get_llm(model: str | None = None) -> ChatOpenAI:
     load_dotenv(find_dotenv(), override=True)
     auth_mode = os.getenv("AUTH_MODE", "jwt").strip().lower()
 
@@ -63,7 +63,7 @@ def get_llm() -> ChatOpenAI:
         sys.exit("Error: no API key available. Set CDSW_API_KEY in .env or ensure /tmp/jwt exists.")
 
     return ChatOpenAI(
-        model=os.getenv("LLM_MODEL", "").strip(),
+        model=(model or os.getenv("LLM_MODEL", "")).strip(),
         openai_api_key=api_key,
         openai_api_base=os.getenv("CDSW_API_URL", "").strip(),
         temperature=0.1,

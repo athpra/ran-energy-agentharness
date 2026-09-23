@@ -40,9 +40,10 @@ def run(
     n_iterations: int,
     enabled_tools: frozenset[str] = ALL_TOOLS,
     condition_name: str = "full_harness_vtzcycle",
+    model: str | None = None,
     run_dir=None,
 ) -> list[dict]:
-    llm = get_llm()
+    llm = get_llm(model)
     sim_test_fn, sim_apply_fn, set_virtual_ts = make_sim_fns(scenario)
 
     harness = AgentHarness(
@@ -127,27 +128,32 @@ def main():
     parser.add_argument("--intent",     default="3 Mbps")
     parser.add_argument("--iterations", type=int, default=int(os.environ.get("ITER", 96)))
     parser.add_argument("--rsg-host",   default=os.getenv("RSG_HOST", ""))
+    parser.add_argument("--model",      default=None,
+                        help="LLM model ID override (e.g. nvidia/nemotron-3-super-120b-a12b). "
+                             "Defaults to LLM_MODEL env var.")
     parser.add_argument(
         "--tools", nargs="*", default=list(ALL_TOOLS), choices=list(ALL_TOOLS),
         help="Subset of tools to enable (default: all).  Use for ablation runs.",
     )
     args, _ = parser.parse_known_args()
 
-    enabled = frozenset(args.tools)
-    label   = (
+    enabled    = frozenset(args.tools)
+    model_slug = args.model.split("/")[-1] if args.model else os.getenv("LLM_MODEL", "llm").split("/")[-1]
+    label      = (
         "full_harness_vtzcycle"
         if enabled == ALL_TOOLS
         else "ablation_vtzcycle_" + "_".join(sorted(enabled))
     )
+    condition  = f"{label}__{model_slug}"
 
     scenario = connect_scenario(args.rsg_host)
-    run_dir  = make_run_dir(label, "llm")
+    run_dir  = make_run_dir(label, model_slug)
 
-    print(f"Running: {label}")
-    print(f"  tools={sorted(enabled)}  intent='{args.intent}'  iterations={args.iterations}")
+    print(f"Running: {condition}")
+    print(f"  model={model_slug}  tools={sorted(enabled)}  intent='{args.intent}'  iterations={args.iterations}")
     print(f"  Saving incrementally to: {run_dir}")
 
-    results = run(scenario, args.intent, args.iterations, enabled, label, run_dir=run_dir)
+    results = run(scenario, args.intent, args.iterations, enabled, condition, args.model, run_dir=run_dir)
     save_results(run_dir, results)
 
 
