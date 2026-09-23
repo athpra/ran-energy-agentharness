@@ -55,8 +55,9 @@ def run(
         kpis        = get_current_kpis(scenario, timestamp=virtual_ts)
         site_keys   = sorted(kpis["per_site"].keys())
         cell_ids    = list(range(len(site_keys)))
-        utilization = {j: kpis["per_site"][k]["n1_prb"] for j, k in enumerate(site_keys)}
-        kpi_summary = _kpi_to_text(kpis)
+        utilization       = {j: kpis["per_site"][k]["n1_prb"] for j, k in enumerate(site_keys)}
+        sleeping_cell_ids = [j for j, k in enumerate(site_keys) if kpis["per_site"][k]["n1_sleeping"]]
+        kpi_summary       = _kpi_to_text(kpis)
 
         result = harness.run_iteration(
             iteration=i + 1,
@@ -64,6 +65,7 @@ def run(
             kpi_summary=kpi_summary,
             cell_ids=cell_ids,
             current_utilization=utilization,
+            sleeping_cell_ids=sleeping_cell_ids,
         )
         r_dict = result.to_dict()
         r_dict["condition"] = condition_name

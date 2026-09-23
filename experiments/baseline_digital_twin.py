@@ -45,8 +45,9 @@ def run(
         kpis        = get_current_kpis(scenario, timestamp=virtual_ts)
         site_keys   = sorted(kpis["per_site"].keys())
         cell_ids    = list(range(len(site_keys)))
-        utilization = {j: kpis["per_site"][k]["n1_prb"] for j, k in enumerate(site_keys)}
-        kpi_summary = _kpi_to_text(kpis)
+        utilization       = {j: kpis["per_site"][k]["n1_prb"] for j, k in enumerate(site_keys)}
+        sleeping_cell_ids = [j for j, k in enumerate(site_keys) if kpis["per_site"][k]["n1_sleeping"]]
+        kpi_summary       = _kpi_to_text(kpis)
 
         # Blueprint PRB rule: N1_PRB < 12 → sleep candidate (mirrors blueprint SQL).
         # Passed as static fallback in case the LLM planner returns [].
@@ -62,6 +63,7 @@ def run(
             cell_ids=cell_ids,
             current_utilization=utilization,
             static_sleep_candidates=sleep_cands or None,
+            sleeping_cell_ids=sleeping_cell_ids,
         )
         print(
             f"  [iter {i+1:>3}] proposed={len(result.proposed_actions)}  "
