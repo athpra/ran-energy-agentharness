@@ -156,7 +156,11 @@ def assemble(
         # this set — not expand it. Without a PRB gate, cold cells appear as
         # candidates even during peak traffic, causing the Planner to propose
         # sleeps that degrade QoS.
-        _PRB_SLEEP_THRESHOLD = 12.0
+        # Widen the PRB gate during peak pricing so candidates exist for Step 2.5.
+        # During peak (expensive electricity), cells up to 25% PRB are worth sleeping.
+        # Shoulder and off_peak keep the conservative 12% gate.
+        pricing_tier = (ctx.get("energy_pricing") or {}).get("current_tier", "")
+        _PRB_SLEEP_THRESHOLD = 25.0 if pricing_tier == "peak" else 12.0
         _sleeping_set = set(sleeping_cell_ids or [])
         sleep_candidates = sorted(
             cid for cid in cell_ids
@@ -189,7 +193,7 @@ def assemble(
 
         lines.append("### Pre-computed Action Guidance")
         lines.append(f"Blocked cells (faults/forecast/interference): {sorted(blocked)}")
-        lines.append(f"SLEEP these cells (Awake, N1_PRB < {_PRB_SLEEP_THRESHOLD:.0f}%, all tool signals clear): {sleep_candidates}")
+        lines.append(f"SLEEP these cells (Awake, N1_PRB < {_PRB_SLEEP_THRESHOLD:.0f}%{', peak pricing' if pricing_tier == 'peak' else ''}, all tool signals clear): {sleep_candidates}")
         if wake_candidates:
             lines.append(
                 f"WAKE these cells (Sleeping, surge in t+{surge_step}): {wake_candidates}"

@@ -95,7 +95,7 @@ def run(
             cell_ids=cell_ids,
             current_utilization=utilization,
             static_wake_candidates=wake_cands or None,
-            sleeping_cell_ids=sleeping_ids or None,
+            sleeping_cell_ids=sleeping_ids,
         )
         r_dict = result.to_dict()
         r_dict["condition"]   = condition_name
