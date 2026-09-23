@@ -66,16 +66,17 @@ def run(
         # cells are sleeping and can propose wake actions when load increases.
         _, kpis = sim_test_fn([])
 
-        site_keys   = sorted(kpis["per_site"].keys())
-        cell_ids    = list(range(len(site_keys)))
-        utilization = {j: kpis["per_site"][k]["n1_prb"] for j, k in enumerate(site_keys)}
-        kpi_summary = _kpi_to_text_viavi(kpis)
+        site_keys      = sorted(kpis["per_site"].keys())
+        cell_ids       = list(range(len(site_keys)))
+        utilization    = {j: kpis["per_site"][k]["n1_prb"] for j, k in enumerate(site_keys)}
+        kpi_summary    = _kpi_to_text_viavi(kpis)
+        sleeping_ids   = [j for j, k in enumerate(site_keys) if kpis["per_site"][k]["n1_sleeping"]]
 
-        # Wake candidates: sleeping cells when QoS drops below intent.
-        # Sort by N12_PRB descending so most-overloaded neighbors are woken first.
+        # Reactive wake candidates: sleeping cells when QoS is already below intent.
+        # The forecast tool also adds proactive wake guidance when a surge is imminent.
         intent_mbps = float(operator_intent.split()[0])
         wake_cands = sorted(
-            (j for j, k in enumerate(site_keys) if kpis["per_site"][k]["n1_sleeping"]),
+            sleeping_ids,
             key=lambda j: kpis["per_site"][site_keys[j]]["n12_prb"],
             reverse=True,
         ) if kpis.get("avg_throughput_mbps", 0) < intent_mbps else []
@@ -87,6 +88,7 @@ def run(
             cell_ids=cell_ids,
             current_utilization=utilization,
             static_wake_candidates=wake_cands or None,
+            sleeping_cell_ids=sleeping_ids or None,
         )
         r_dict = result.to_dict()
         r_dict["condition"]   = condition_name

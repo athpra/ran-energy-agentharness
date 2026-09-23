@@ -32,6 +32,7 @@ def assemble(
     cell_ids: list[int],
     current_utilization: dict[int, float],
     enabled_tools: frozenset[str] = ALL_TOOLS,
+    sleeping_cell_ids: list[int] | None = None,
 ) -> tuple[dict[str, Any], str]:
     """
     Returns (raw_context_dict, formatted_prompt_block).
@@ -61,12 +62,21 @@ def assemble(
     if "traffic_forecast" in enabled_tools:
         data = traffic_forecast_query(timestamp=timestamp, cell_id=None, horizon=3)
         ctx["traffic_forecast"] = data
-        lines.append("**Traffic forecast (next 3 intervals):**")
-        for cid in sorted(data):
-            steps = ", ".join(
-                f"t+{s['step']}={s['predicted_mbps']} Mbps" for s in data[cid]
+        cur = data["current"]
+        lines.append(
+            f"**Traffic forecast — current: {cur['profile']}  {cur['ue_ratio']}×  {cur['ues']} UEs**"
+        )
+        for s in data["forecast"]:
+            surge_tag = "  ⚠ SURGE" if s["surge"] else ""
+            lines.append(
+                f"  t+{s['step']} (+{s['step'] * 15} min): "
+                f"{s['profile']}  {s['ue_ratio']}×  {s['ues']} UEs{surge_tag}"
             )
-            lines.append(f"  Cell {cid}: {steps}")
+        if data["surge_imminent"]:
+            lines.append(
+                f"  ⚠ LOAD SURGE in {data['surge_step']} step(s) — "
+                f"sleeping cells risk QoS violation; consider waking them now."
+            )
         lines.append("")
 
     if "alarm_fault" in enabled_tools:
@@ -126,15 +136,13 @@ def assemble(
         fault_blocked = {cid for cid, v in fault_data.items() if v.get("active")}
         blocked |= fault_blocked
 
-        # Forecast-blocked cells (t+1 > 5 × assumed 5 Mbps = 25 Mbps)
-        forecast_threshold = 25.0
-        forecast_data = ctx.get("traffic_forecast", {})
-        forecast_blocked = set()
-        for cid, steps in forecast_data.items():
-            t1 = next((s["predicted_mbps"] for s in steps if s["step"] == 1), 0)
-            if t1 > forecast_threshold:
-                forecast_blocked.add(int(cid))
-        blocked |= forecast_blocked
+        # Forecast-blocked: block all new sleeps when a traffic surge is imminent.
+        # A surge is ue_ratio ≥ 1.5× current (e.g. Afternoon→Evening_1, Night→Early).
+        forecast_data    = ctx.get("traffic_forecast", {})
+        surge_imminent   = forecast_data.get("surge_imminent", False)
+        surge_step       = forecast_data.get("surge_step")
+        forecast_blocked = set(cell_ids) if surge_imminent else set()
+        blocked         |= forecast_blocked
 
         # Interference-blocked cells (OVERLOAD RISK)
         interference_blocked = {
@@ -146,9 +154,19 @@ def assemble(
         sleep_candidates = sorted(cid for cid in cell_ids if cid not in blocked)
         ctx["sleep_candidates"] = sleep_candidates
 
+        # Proactive wake candidates: sleeping cells that should wake before a surge.
+        wake_candidates: list[int] = []
+        if surge_imminent and sleeping_cell_ids:
+            wake_candidates = sorted(sleeping_cell_ids)
+        ctx["wake_candidates"] = wake_candidates
+
         lines.append("### Pre-computed Action Guidance")
         lines.append(f"Blocked cells (faults/forecast/interference): {sorted(blocked)}")
         lines.append(f"SLEEP these cells (Awake, N1_PRB low, all signals clear): {sleep_candidates}")
+        if wake_candidates:
+            lines.append(
+                f"WAKE these cells (Sleeping, surge in t+{surge_step}): {wake_candidates}"
+            )
         lines.append("")
 
     return ctx, "\n".join(lines)

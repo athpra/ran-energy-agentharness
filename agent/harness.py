@@ -102,6 +102,7 @@ class AgentHarness:
         current_utilization: dict[int, float],
         static_sleep_candidates: list[int] | None = None,
         static_wake_candidates:  list[int] | None = None,
+        sleeping_cell_ids:       list[int] | None = None,
     ) -> IterationResult:
         t_start = time.time()
 
@@ -111,6 +112,7 @@ class AgentHarness:
             cell_ids=cell_ids,
             current_utilization=current_utilization,
             enabled_tools=self.enabled_tools,
+            sleeping_cell_ids=sleeping_cell_ids,
         )
 
         # Step 2 — planner proposes actions
@@ -136,18 +138,25 @@ class AgentHarness:
             ]
             planner_raw = f"[fallback] LLM returned []; using {len(proposed)} candidates: {candidates}"
 
-        # Wake fallback: if QoS intent is being violated and sleeping cells were
-        # explicitly flagged by the caller, wake them even if the LLM missed it.
-        if not proposed and static_wake_candidates:
-            proposed = [
-                {"action": "wake", "cell_id": cid,
-                 "reason": "QoS below intent: restoring capacity"}
-                for cid in static_wake_candidates
-            ]
-            planner_raw = (
-                f"[wake-fallback] LLM returned []; waking {len(proposed)} cells "
-                f"to restore QoS: {static_wake_candidates}"
-            )
+        # Wake fallback: tool-derived surge warning takes priority over reactive
+        # QoS-based wake, since it acts before throughput has already dropped.
+        if not proposed:
+            tool_wake = tool_ctx.get("wake_candidates") or []
+            reactive_wake = static_wake_candidates or []
+            wake_source = tool_wake or reactive_wake
+            if wake_source:
+                reason = (
+                    "surge imminent: proactive capacity restore"
+                    if tool_wake else "QoS below intent: restoring capacity"
+                )
+                proposed = [
+                    {"action": "wake", "cell_id": cid, "reason": reason}
+                    for cid in wake_source
+                ]
+                planner_raw = (
+                    f"[{'surge' if tool_wake else 'qos'}-wake-fallback] LLM returned []; "
+                    f"waking {len(proposed)} cells: {wake_source}"
+                )
 
         # Step 3 — simulate proposed actions (Sim 1)
         if proposed:

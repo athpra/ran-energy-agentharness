@@ -63,13 +63,13 @@ def run(
         # Get current network state including accumulated sleep history
         _, kpis = sim_test_fn([])
 
-        site_keys   = sorted(kpis["per_site"].keys())
-        cell_ids    = list(range(len(site_keys)))
-        utilization = {j: kpis["per_site"][k]["n1_prb"] for j, k in enumerate(site_keys)}
-        kpi_summary = _kpi_to_text_viavi(kpis)
+        site_keys    = sorted(kpis["per_site"].keys())
+        cell_ids     = list(range(len(site_keys)))
+        utilization  = {j: kpis["per_site"][k]["n1_prb"] for j, k in enumerate(site_keys)}
+        kpi_summary  = _kpi_to_text_viavi(kpis)
+        sleeping_ids = [j for j, k in enumerate(site_keys) if kpis["per_site"][k]["n1_sleeping"]]
 
         # Blueprint PRB rule: N1_PRB < 12 % → sleep candidate (mirrors blueprint SQL).
-        # Sort by PRB ascending so the LLM sees most-underloaded cells first.
         sleep_cands = sorted(
             (j for j, k in enumerate(site_keys)
              if not kpis["per_site"][k]["n1_sleeping"]
@@ -77,11 +77,10 @@ def run(
             key=lambda j: kpis["per_site"][site_keys[j]]["n1_prb"],
         )
 
-        # Wake candidates: sleeping cells when QoS is below the operator intent.
-        # Sort by N12_PRB descending (most overloaded neighbor first).
+        # Reactive wake candidates: no forecast tool, so only wake after QoS violation.
         intent_mbps = float(operator_intent.split()[0])
         wake_cands = sorted(
-            (j for j, k in enumerate(site_keys) if kpis["per_site"][k]["n1_sleeping"]),
+            sleeping_ids,
             key=lambda j: kpis["per_site"][site_keys[j]]["n12_prb"],
             reverse=True,
         ) if kpis.get("avg_throughput_mbps", 0) < intent_mbps else []
@@ -94,6 +93,7 @@ def run(
             current_utilization=utilization,
             static_sleep_candidates=sleep_cands or None,
             static_wake_candidates=wake_cands or None,
+            sleeping_cell_ids=sleeping_ids or None,
         )
         r_dict = result.to_dict()
         r_dict["condition"]   = condition_name
