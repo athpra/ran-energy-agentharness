@@ -104,11 +104,14 @@ class AgentHarness:
         kpi_summary: str,
         cell_ids: list[int],
         current_utilization: dict[int, float],
-        static_sleep_candidates: list[int] | None = None,
-        static_wake_candidates:  list[int] | None = None,
-        sleeping_cell_ids:       list[int] | None = None,
+        static_sleep_candidates:  list[int] | None = None,
+        static_wake_candidates:   list[int] | None = None,
+        sleeping_cell_ids:        list[int] | None = None,
+        current_throughput_mbps:  float | None = None,
     ) -> IterationResult:
         t_start = time.time()
+
+        intent_mbps = float(self.operator_intent.split()[0])
 
         # Step 1 — assemble tool context
         tool_ctx, tool_block = assemble(
@@ -117,6 +120,8 @@ class AgentHarness:
             current_utilization=current_utilization,
             enabled_tools=self.enabled_tools,
             sleeping_cell_ids=sleeping_cell_ids,
+            current_throughput_mbps=current_throughput_mbps,
+            intent_mbps=intent_mbps,
         )
 
         # Step 2 — planner proposes actions

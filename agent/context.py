@@ -33,6 +33,8 @@ def assemble(
     current_utilization: dict[int, float],
     enabled_tools: frozenset[str] = ALL_TOOLS,
     sleeping_cell_ids: list[int] | None = None,
+    current_throughput_mbps: float | None = None,
+    intent_mbps: float | None = None,
 ) -> tuple[dict[str, Any], str]:
     """
     Returns (raw_context_dict, formatted_prompt_block).
@@ -162,7 +164,20 @@ def assemble(
         pricing_tier = (ctx.get("energy_pricing") or {}).get("current_tier", "")
         _PRB_SLEEP_THRESHOLD = 25.0 if pricing_tier == "peak" else 12.0
         _sleeping_set = set(sleeping_cell_ids or [])
-        sleep_candidates = sorted(
+
+        # Throughput guard: if aggregate network throughput is already near or
+        # below intent, block all new sleeps regardless of per-cell PRB.
+        # During overloaded periods, low-PRB cells are an artefact of UEs shedding
+        # to neighbors — sleeping them makes congestion worse, causing the
+        # planner/validator oscillation seen during Evening Peak.
+        _THROUGHPUT_HEADROOM = 1.1  # require 10% headroom above intent
+        throughput_blocked = (
+            current_throughput_mbps is not None
+            and intent_mbps is not None
+            and current_throughput_mbps < intent_mbps * _THROUGHPUT_HEADROOM
+        )
+
+        sleep_candidates = [] if throughput_blocked else sorted(
             cid for cid in cell_ids
             if cid not in blocked
             and cid not in _sleeping_set
@@ -183,6 +198,7 @@ def assemble(
             "fault_blocked":        sorted(fault_blocked),
             "forecast_blocked":     sorted(forecast_blocked),
             "interference_blocked": sorted(interference_blocked),
+            "throughput_blocked":   throughput_blocked,
             "sleep_candidates":     sleep_candidates,
             "wake_candidates":      wake_candidates,
             "surge_imminent":       surge_imminent,
@@ -193,6 +209,12 @@ def assemble(
 
         lines.append("### Pre-computed Action Guidance")
         lines.append(f"Blocked cells (faults/forecast/interference): {sorted(blocked)}")
+        if throughput_blocked:
+            lines.append(
+                f"⚠ THROUGHPUT GUARD: current tp={current_throughput_mbps:.2f} Mbps "
+                f"< intent×1.1 ({intent_mbps * _THROUGHPUT_HEADROOM:.2f} Mbps) — "
+                f"all sleep candidates suppressed; focus on waking cells or holding state."
+            )
         lines.append(f"SLEEP these cells (Awake, N1_PRB < {_PRB_SLEEP_THRESHOLD:.0f}%{', peak pricing' if pricing_tier == 'peak' else ''}, all tool signals clear): {sleep_candidates}")
         if wake_candidates:
             lines.append(
