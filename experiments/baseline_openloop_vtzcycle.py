@@ -24,6 +24,7 @@ from experiments.common import (
     make_run_dir,
     make_sim_fns,
     save_results,
+    save_run_config,
     append_result,
     _kpi_to_text_viavi,
 )
@@ -52,6 +53,7 @@ def run(
     n_iterations: int,
     condition_name: str = "baseline_openloop_vtzcycle",
     run_dir=None,
+    model_id: str = "",
 ) -> list[dict]:
     llm = get_llm()
     sim_test_fn, sim_apply_fn, set_virtual_ts = make_sim_fns(scenario)
@@ -155,6 +157,8 @@ def run(
             "planner_raw":       planner_raw,
             "kpi_summary":       kpi_summary,
             "sim2_summary":      sim_summary,
+            "planner_model":     model_id,
+            "validator_model":   "",
             "pre_kpis":          kpis,
             "post_kpis":         post_kpis,
             "qos_violated":      violated,
@@ -182,8 +186,20 @@ def main():
     parser.add_argument("--rsg-host",   default=os.getenv("RSG_HOST", ""))
     args, _ = parser.parse_known_args()
 
+    model_id   = os.getenv("LLM_MODEL", "")
+    model_slug = model_id.split("/")[-1] if model_id else "llm"
+
     scenario = connect_scenario(args.rsg_host)
-    run_dir  = make_run_dir("baseline_openloop_vtzcycle", "llm")
+    run_dir  = make_run_dir("baseline_openloop_vtzcycle", model_slug)
+
+    save_run_config(run_dir, {
+        "condition":       "baseline_openloop_vtzcycle",
+        "planner_model":   model_id,
+        "validator_model": "",
+        "intent":          args.intent,
+        "iterations":      args.iterations,
+        "tools":           [],
+    })
 
     print(
         f"Running: baseline_openloop_vtzcycle  "
@@ -191,7 +207,7 @@ def main():
     )
     print(f"  Saving incrementally to: {run_dir}")
 
-    results = run(scenario, args.intent, args.iterations, run_dir=run_dir)
+    results = run(scenario, args.intent, args.iterations, run_dir=run_dir, model_id=model_id)
     save_results(run_dir, results)
 
 

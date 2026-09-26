@@ -32,6 +32,7 @@ from experiments.common import (
     make_run_dir,
     make_sim_fns,
     save_results,
+    save_run_config,
     append_result,
     _kpi_to_text_viavi,
 )
@@ -46,6 +47,8 @@ def run(
     model: str | None = None,
     validator_model: str | None = None,
     run_dir=None,
+    planner_model_id: str = "",
+    validator_model_id: str = "",
 ) -> list[dict]:
     llm           = get_llm(model)
     validator_llm = get_validator_llm(validator_model)
@@ -100,8 +103,10 @@ def run(
             pre_kpis=kpis,
         )
         r_dict = result.to_dict()
-        r_dict["condition"]   = condition_name
-        r_dict["kpi_summary"] = kpi_summary
+        r_dict["condition"]        = condition_name
+        r_dict["planner_model"]    = planner_model_id
+        r_dict["validator_model"]  = validator_model_id
+        r_dict["kpi_summary"]      = kpi_summary
 
         post_tp  = (r_dict["post_kpis"].get("avg_throughput_mbps")
                     or kpis.get("avg_throughput_mbps", 0))
@@ -157,17 +162,30 @@ def main():
     )
     condition  = f"{label}__{model_slug}"
 
+    planner_id   = args.model or os.getenv("LLM_MODEL", "")
+    validator_id = args.validator_model or planner_id
+
     scenario = connect_scenario(args.rsg_host)
     run_dir  = make_run_dir(label, model_slug)
 
     val_slug = args.validator_model.split("/")[-1] if args.validator_model else model_slug
+
+    save_run_config(run_dir, {
+        "condition":       condition,
+        "planner_model":   planner_id,
+        "validator_model": validator_id,
+        "intent":          args.intent,
+        "iterations":      args.iterations,
+        "tools":           sorted(enabled),
+    })
 
     print(f"Running: {condition}")
     print(f"  planner={model_slug}  validator={val_slug}  tools={sorted(enabled)}  intent='{args.intent}'  iterations={args.iterations}")
     print(f"  Saving incrementally to: {run_dir}")
 
     results = run(scenario, args.intent, args.iterations, enabled, condition, args.model,
-                  args.validator_model, run_dir=run_dir)
+                  args.validator_model, run_dir=run_dir,
+                  planner_model_id=planner_id, validator_model_id=validator_id)
     save_results(run_dir, results)
 
 

@@ -572,6 +572,12 @@ def make_run_dir(condition_name: str, model_name: str) -> Path:
     return run_dir
 
 
+def save_run_config(run_dir: Path, config: dict) -> None:
+    """Write run_config.json to the run directory for provenance tracking."""
+    with open(run_dir / "run_config.json", "w") as f:
+        json.dump(config, f, indent=2)
+
+
 def append_result(run_dir: Path, result: dict) -> None:
     """Append a single iteration result to iterations.jsonl (creates file if needed)."""
     with open(run_dir / "iterations.jsonl", "a") as f:
