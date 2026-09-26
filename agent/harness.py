@@ -53,6 +53,7 @@ class IterationResult:
     planner_elapsed_s:  float
     validator_elapsed_s: float
     total_elapsed_s:    float
+    pre_kpis:           dict[str, Any] = field(default_factory=dict)
     post_kpis:          dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -71,6 +72,7 @@ class IterationResult:
             "planner_elapsed_s":    round(self.planner_elapsed_s,  2),
             "validator_elapsed_s":  round(self.validator_elapsed_s, 2),
             "total_elapsed_s":      round(self.total_elapsed_s,    2),
+            "pre_kpis":             self.pre_kpis,
             "post_kpis":            self.post_kpis,
         }
 
@@ -108,6 +110,7 @@ class AgentHarness:
         static_wake_candidates:   list[int] | None = None,
         sleeping_cell_ids:        list[int] | None = None,
         current_throughput_mbps:  float | None = None,
+        pre_kpis:                 dict | None = None,
     ) -> IterationResult:
         t_start = time.time()
 
@@ -219,6 +222,7 @@ class AgentHarness:
             planner_elapsed_s=t_plan,
             validator_elapsed_s=t_val,
             total_elapsed_s=time.time() - t_start,
+            pre_kpis=pre_kpis or {},
             post_kpis=post_kpis,
         )
         self.history.append(result)

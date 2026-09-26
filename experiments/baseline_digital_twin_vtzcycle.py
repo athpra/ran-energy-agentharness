@@ -94,6 +94,7 @@ def run(
             static_sleep_candidates=sleep_cands or None,
             static_wake_candidates=wake_cands or None,
             sleeping_cell_ids=sleeping_ids or None,
+            pre_kpis=kpis,
         )
         r_dict = result.to_dict()
         r_dict["condition"]   = condition_name

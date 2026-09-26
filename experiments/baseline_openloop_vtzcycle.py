@@ -155,6 +155,7 @@ def run(
             "planner_raw":       planner_raw,
             "kpi_summary":       kpi_summary,
             "sim2_summary":      sim_summary,
+            "pre_kpis":          kpis,
             "post_kpis":         post_kpis,
             "qos_violated":      violated,
             "total_elapsed_s":   round(time.time() - t0, 3),
