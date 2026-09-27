@@ -163,7 +163,7 @@ def main():
     condition  = f"{label}__{model_slug}"
 
     planner_id   = args.model or os.getenv("LLM_MODEL", "")
-    validator_id = args.validator_model or planner_id
+    validator_id = args.validator_model or os.getenv("VALIDATOR_MODEL", "") or planner_id
 
     scenario = connect_scenario(args.rsg_host)
     run_dir  = make_run_dir(label, model_slug)
