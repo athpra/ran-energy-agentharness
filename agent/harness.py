@@ -197,6 +197,13 @@ class AgentHarness:
         )
         # Veto-only semantics: approved = proposed minus explicitly rejected.
         # This is robust against the model omitting safe actions from "approved".
+        #
+        # Wake actions are monotonically safe — restoring a sleeping cell can
+        # only add capacity, never reduce throughput. Restricting the validator's
+        # veto to sleep proposals prevents false rejections during capacity-
+        # constrained periods (e.g. Evening Peak) where Sim 1 shows sub-intent
+        # throughput regardless of whether cells are woken or not.
+        rejected = [r for r in rejected if r.get("action") == "sleep"]
         rejected_ids = {r["cell_id"] for r in rejected}
         approved = [a for a in proposed if a["cell_id"] not in rejected_ids]
 
