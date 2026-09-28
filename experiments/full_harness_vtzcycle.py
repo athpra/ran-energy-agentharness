@@ -31,7 +31,6 @@ from experiments.common import (
     get_validator_llm,
     make_run_dir,
     make_sim_fns,
-    save_results,
     save_run_config,
     append_result,
     _kpi_to_text_viavi,
@@ -183,10 +182,9 @@ def main():
     print(f"  planner={model_slug}  validator={val_slug}  tools={sorted(enabled)}  intent='{args.intent}'  iterations={args.iterations}")
     print(f"  Saving incrementally to: {run_dir}")
 
-    results = run(scenario, args.intent, args.iterations, enabled, condition, args.model,
-                  args.validator_model, run_dir=run_dir,
-                  planner_model_id=planner_id, validator_model_id=validator_id)
-    save_results(run_dir, results)
+    run(scenario, args.intent, args.iterations, enabled, condition, args.model,
+        args.validator_model, run_dir=run_dir,
+        planner_model_id=planner_id, validator_model_id=validator_id)
 
 
 if __name__ == "__main__":

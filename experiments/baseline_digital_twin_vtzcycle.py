@@ -27,7 +27,6 @@ from experiments.common import (
     get_llm,
     make_run_dir,
     make_sim_fns,
-    save_results,
     save_run_config,
     append_result,
     _kpi_to_text_viavi,
@@ -160,8 +159,7 @@ def main():
     )
     print(f"  Saving incrementally to: {run_dir}")
 
-    results = run(scenario, args.intent, args.iterations, run_dir=run_dir, model_id=model_id)
-    save_results(run_dir, results)
+    run(scenario, args.intent, args.iterations, run_dir=run_dir, model_id=model_id)
 
 
 if __name__ == "__main__":
