@@ -121,7 +121,7 @@ The system is a fixed-pipeline tool-augmented agent harness. On each decision cy
 
 - [Cloudera AI Inference Service](https://www.cloudera.com/products/machine-learning.html) — LLM hosting (Planner + Validator)
 - [VIAVI TeraVM AI RAN Scenario Generator (AI RSG)](https://www.viavisolutions.com) — 5G RAN digital twin
-- [LangChain](https://github.com/langchain-ai/langchain) — LLM orchestration
+- [LangChain](https://github.com/langchain-ai/langchain) (`langchain-openai`) — LLM client via OpenAI-compatible API; model inference runs on Cloudera AI Inference Service, not OpenAI
 - Python 3.10+, pandas, numpy, matplotlib, seaborn
 
 ## Target Audience
