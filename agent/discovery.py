@@ -31,8 +31,9 @@ The agent puts capacity-layer (N1) cells to sleep when traffic is low and wakes
 them again, while keeping per-user throughput at or above the operator intent.
 
 Read the data catalog. Select every dataset that would change whether a cell can
-safely sleep, or whether a sleeping cell should wake. Leave out datasets that are
-unrelated, out of date, or superseded by another dataset.
+safely sleep, whether a sleeping cell should wake, or how much a sleep saves in
+energy cost. Leave out datasets that are unrelated, out of date, or superseded by
+another dataset.
 
 Respond with JSON only, no markdown:
 {"selected": [{"dataset": "<name from the catalog>", "reason": "<one short line>"}]}
