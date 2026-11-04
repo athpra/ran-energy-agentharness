@@ -10,6 +10,10 @@ fixed at whatever the wall-clock hour happens to be.
 Dual-LLM closed loop (Planner + Validator) with VIAVI AI RSG +
 all five additional tools active.
 
+Pass --discover to let the Planner choose its own data from the catalog
+(data/synthetic/catalog.yaml) before the first cycle, and --policy to run with
+tuned thresholds (experiments/tune_policy.py).
+
 Run:
     python experiments/full_harness_vtzcycle.py --intent "3 Mbps" --iterations 96
 """
@@ -24,6 +28,9 @@ import pandas as pd
 
 from agent.harness import AgentHarness
 from agent.context import ALL_TOOLS
+from agent.catalog import load_catalog
+from agent.discovery import add_discovery_args, discover
+from agent.policy import DEFAULT_POLICY, Policy, load_policy, tunable_params
 from experiments.common import (
     apply_job_arguments,
     connect_scenario,
@@ -48,9 +55,14 @@ def run(
     run_dir=None,
     planner_model_id: str = "",
     validator_model_id: str = "",
+    policy: Policy | None = None,
+    llm=None,
+    validator_llm=None,
+    verbose: bool = True,
 ) -> list[dict]:
-    llm           = get_llm(model)
-    validator_llm = get_validator_llm(validator_model)
+    # llm / validator_llm let the policy tuner pass stand-ins instead of endpoints
+    llm           = llm or get_llm(model)
+    validator_llm = validator_llm or get_validator_llm(validator_model)
     sim_test_fn, sim_apply_fn, set_virtual_ts = make_sim_fns(scenario)
 
     harness = AgentHarness(
@@ -60,6 +72,7 @@ def run(
         operator_intent=operator_intent,
         enabled_tools=enabled_tools,
         validator_llm=validator_llm,
+        policy=policy,
     )
 
     ts = pd.Timestamp.now().normalize()  # midnight today; iterations advance virtually
@@ -116,12 +129,13 @@ def run(
         r_dict["qos_violated"] = violated
 
         qos_tag = "✗ QoS VIOLATION" if violated else "✓"
-        print(
-            f"  [iter {i+1:>3}] proposed={len(result.proposed_actions)}  "
-            f"approved={len(result.approved_actions)}  "
-            f"rejected={len(result.rejected_actions)}  "
-            f"tp={post_tp:.2f} Mbps  sleeping={sleeping}/{total}  {qos_tag}"
-        )
+        if verbose:
+            print(
+                f"  [iter {i+1:>3}] proposed={len(result.proposed_actions)}  "
+                f"approved={len(result.approved_actions)}  "
+                f"rejected={len(result.rejected_actions)}  "
+                f"tp={post_tp:.2f} Mbps  sleeping={sleeping}/{total}  {qos_tag}"
+            )
 
         if run_dir is not None:
             append_result(run_dir, r_dict)
@@ -150,15 +164,31 @@ def main():
         "--tools", nargs="*", default=list(ALL_TOOLS), choices=list(ALL_TOOLS),
         help="Subset of tools to enable (default: all).  Use for ablation runs.",
     )
+    add_discovery_args(parser)
+    parser.add_argument(
+        "--policy", default=None,
+        help="Policy file with the harness thresholds (e.g. policies/tuned.yaml). Default: built-in values.",
+    )
     args, _ = parser.parse_known_args()
+    policy = load_policy(args.policy)
 
     enabled    = frozenset(args.tools)
+    discovery  = None
+    if args.discover:
+        discovery = discover(get_llm(args.model), args.intent, load_catalog(args.catalog))
+        enabled   = discovery.enabled_tools
+        print(discovery.summary())
     model_slug = args.model.split("/")[-1] if args.model else os.getenv("LLM_MODEL", "llm").split("/")[-1]
-    label      = (
-        "full_harness_vtzcycle"
-        if enabled == ALL_TOOLS
-        else "ablation_vtzcycle_" + "_".join(sorted(enabled))
-    )
+    if discovery is not None:
+        label = "discovery_harness_vtzcycle"
+    else:
+        label = (
+            "full_harness_vtzcycle"
+            if enabled == ALL_TOOLS
+            else "ablation_vtzcycle_" + "_".join(sorted(enabled))
+        )
+    if policy != DEFAULT_POLICY:
+        label += f"_{policy.name}"
     condition  = f"{label}__{model_slug}"
 
     planner_id   = args.model or os.getenv("LLM_MODEL", "")
@@ -176,6 +206,8 @@ def main():
         "intent":          args.intent,
         "iterations":      args.iterations,
         "tools":           sorted(enabled),
+        "policy":          {"name": policy.name, **tunable_params(policy)},
+        **({"discovery": discovery.to_dict()} if discovery is not None else {}),
     })
 
     print(f"Running: {condition}")
@@ -184,7 +216,7 @@ def main():
 
     run(scenario, args.intent, args.iterations, enabled, condition, args.model,
         args.validator_model, run_dir=run_dir,
-        planner_model_id=planner_id, validator_model_id=validator_id)
+        planner_model_id=planner_id, validator_model_id=validator_id, policy=policy)
 
 
 if __name__ == "__main__":

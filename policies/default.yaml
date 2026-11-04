@@ -1,0 +1,8 @@
+name: default
+prb_sleep_threshold: 12.0
+prb_sleep_threshold_peak: 25.0
+throughput_headroom: 1.1
+surge_ratio: 1.5
+overload_threshold_pct: 85.0
+meta:
+  note: The built-in thresholds. Copy this file to try other values.

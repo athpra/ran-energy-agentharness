@@ -23,6 +23,7 @@ import pandas as pd
 from langchain_openai import ChatOpenAI
 
 from agent.context   import assemble, ALL_TOOLS
+from agent.policy    import Policy
 from agent.planner   import plan
 from agent.validator import validate
 
@@ -89,6 +90,7 @@ class AgentHarness:
         enabled_tools: frozenset[str] = ALL_TOOLS,
         planner_system_prompt: str | None = None,
         validator_llm: ChatOpenAI | None = None,
+        policy: Policy | None = None,
     ):
         self.llm                    = llm
         self.validator_llm          = validator_llm or llm
@@ -97,6 +99,7 @@ class AgentHarness:
         self.operator_intent        = operator_intent
         self.enabled_tools          = enabled_tools
         self.planner_system_prompt  = planner_system_prompt
+        self.policy                 = policy
         self.history: list[IterationResult] = []
 
     def run_iteration(
@@ -125,6 +128,7 @@ class AgentHarness:
             sleeping_cell_ids=sleeping_cell_ids,
             current_throughput_mbps=current_throughput_mbps,
             intent_mbps=intent_mbps,
+            policy=self.policy,
         )
 
         # Step 2 — planner proposes actions

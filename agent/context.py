@@ -17,6 +17,7 @@ from tools.traffic_prediction import query as traffic_forecast_query
 from tools.alarm_fault        import query as alarm_fault_query
 from tools.interference       import query as interference_query
 from tools.energy_pricing     import query as energy_pricing_query
+from agent.policy             import DEFAULT_POLICY, Policy
 
 ALL_TOOLS = frozenset([
     "historical_kpi",
@@ -35,13 +36,18 @@ def assemble(
     sleeping_cell_ids: list[int] | None = None,
     current_throughput_mbps: float | None = None,
     intent_mbps: float | None = None,
+    policy: Policy | None = None,
 ) -> tuple[dict[str, Any], str]:
     """
     Returns (raw_context_dict, formatted_prompt_block).
 
+    policy supplies the numeric thresholds (agent/policy.py); None uses the
+    defaults.
+
     raw_context_dict  — structured data for logging / correlation analysis
     formatted_prompt_block — human-readable text injected into the LLM prompt
     """
+    policy = policy or DEFAULT_POLICY
     ctx: dict[str, Any] = {"tools_used": list(enabled_tools)}
     lines: list[str]    = ["### Tool Context\n"]
     if not enabled_tools:
@@ -62,7 +68,8 @@ def assemble(
         lines.append("")
 
     if "traffic_forecast" in enabled_tools:
-        data = traffic_forecast_query(timestamp=timestamp, cell_id=None, horizon=3)
+        data = traffic_forecast_query(timestamp=timestamp, cell_id=None, horizon=3,
+                                      surge_ratio=policy.surge_ratio)
         ctx["traffic_forecast"] = data
         cur = data["current"]
         lines.append(
@@ -104,6 +111,7 @@ def assemble(
             result = interference_query(
                 sleeping_cells=[cid],
                 current_utilization=current_utilization,
+                overload_threshold_pct=policy.overload_threshold_pct,
             )
             ctx["interference"][cid] = result
             if result["neighbor_load_pct"]:
@@ -139,7 +147,8 @@ def assemble(
         blocked |= fault_blocked
 
         # Forecast-blocked: block all new sleeps when a traffic surge is imminent.
-        # A surge is ue_ratio ≥ 1.5× current (e.g. Afternoon→Evening_1, Night→Early).
+        # A surge is ue_ratio ≥ policy.surge_ratio × current (default 1.5×:
+        # Afternoon→Evening_1, Night→Early).
         forecast_data    = ctx.get("traffic_forecast", {})
         surge_imminent   = forecast_data.get("surge_imminent", False)
         surge_step       = forecast_data.get("surge_step")
@@ -162,7 +171,9 @@ def assemble(
         # During peak (expensive electricity), cells up to 25% PRB are worth sleeping.
         # Shoulder and off_peak keep the conservative 12% gate.
         pricing_tier = (ctx.get("energy_pricing") or {}).get("current_tier", "")
-        _PRB_SLEEP_THRESHOLD = 25.0 if pricing_tier == "peak" else 12.0
+        _PRB_SLEEP_THRESHOLD = (
+            policy.prb_sleep_threshold_peak if pricing_tier == "peak" else policy.prb_sleep_threshold
+        )
         _sleeping_set = set(sleeping_cell_ids or [])
 
         # Throughput guard: if aggregate network throughput is already near or
@@ -170,7 +181,7 @@ def assemble(
         # During overloaded periods, low-PRB cells are an artefact of UEs shedding
         # to neighbors — sleeping them makes congestion worse, causing the
         # planner/validator oscillation seen during Evening Peak.
-        _THROUGHPUT_HEADROOM = 1.1  # require 10% headroom above intent
+        _THROUGHPUT_HEADROOM = policy.throughput_headroom  # default 1.1: 10% above intent
         throughput_blocked = (
             current_throughput_mbps is not None
             and intent_mbps is not None
@@ -212,7 +223,7 @@ def assemble(
         if throughput_blocked:
             lines.append(
                 f"⚠ THROUGHPUT GUARD: current tp={current_throughput_mbps:.2f} Mbps "
-                f"< intent×1.1 ({intent_mbps * _THROUGHPUT_HEADROOM:.2f} Mbps) — "
+                f"< intent×{_THROUGHPUT_HEADROOM:g} ({intent_mbps * _THROUGHPUT_HEADROOM:.2f} Mbps) — "
                 f"all sleep candidates suppressed; focus on waking cells or holding state."
             )
         lines.append(f"SLEEP these cells (Awake, N1_PRB < {_PRB_SLEEP_THRESHOLD:.0f}%{', peak pricing' if pricing_tier == 'peak' else ''}, all tool signals clear): {sleep_candidates}")

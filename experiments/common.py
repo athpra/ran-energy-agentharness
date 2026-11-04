@@ -204,6 +204,11 @@ def _compute_kpis(sim_ue: pd.DataFrame, sim_cell: pd.DataFrame) -> dict:
 
 # ── VIAVI RSG simulation wrappers ─────────────────────────────────────────────
 
+def _is_mock(scenario) -> bool:
+    """True for mock_rsg.Scenario, which has no SBA endpoint to rate-limit."""
+    return type(scenario).__module__.startswith("mock_rsg")
+
+
 def make_sim_fns(scenario):
     """
     Return (sim_test_fn, sim_apply_fn, set_virtual_ts).
@@ -272,7 +277,8 @@ def make_sim_fns(scenario):
                 for cell_name, is_sleeping in cell_sleep_state.items():
                     cmd = "turn_off" if is_sleeping else "turn_on"
                     sim.command(cmd, cell=cell_name, reason="accumulated state")
-                    _time.sleep(0.15)
+                    if not _is_mock(scenario):
+                        _time.sleep(0.15)
 
                 # Apply new actions for this iteration
                 for a in (actions or []):

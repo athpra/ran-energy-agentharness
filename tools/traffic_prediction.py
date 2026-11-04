@@ -39,6 +39,7 @@ def query(
     cell_id: int | None = None,   # unused; network-wide forecast — kept for interface compat
     horizon: int = 3,
     step_minutes: int = 15,
+    surge_ratio: float = 1.5,
 ) -> dict:
     """
     Return load forecast for the next `horizon` steps (each `step_minutes` apart).
@@ -54,7 +55,7 @@ def query(
             "surge_step":     int | None,   # first step where a surge occurs, or None
         }
 
-    A step is flagged as a surge when its ue_ratio >= 1.5 × current ue_ratio,
+    A step is flagged as a surge when its ue_ratio >= surge_ratio × current ue_ratio,
     giving the Planner clear advance warning to wake sleeping cells before the
     load transition hits.
     """
@@ -68,7 +69,7 @@ def query(
     for step in range(1, horizon + 1):
         future_ts      = ts + pd.Timedelta(minutes=step_minutes * step)
         future_profile = _get_profile(future_ts)
-        is_surge       = future_profile["ue_ratio"] >= current_ratio * 1.5
+        is_surge       = future_profile["ue_ratio"] >= current_ratio * surge_ratio
         if is_surge and surge_step is None:
             surge_step = step
         forecast_steps.append({

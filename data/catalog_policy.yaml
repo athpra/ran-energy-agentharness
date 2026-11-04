@@ -1,0 +1,36 @@
+# Catalog policy: the fields a person decides, merged into the generated
+# catalog (data/synthetic/catalog.yaml) by agent/catalog.py:load_catalog().
+#
+#   certified        a person has reviewed this entry
+#   safety_critical  the harness always enables this dataset, even when
+#                    discovery leaves it out (only honoured when certified)
+#   decision_use     how the dataset should affect decisions; shown to the
+#                    discovery step only when certified
+#
+# Entries not listed here (distractors, drafts from profile_catalog.py) are
+# uncertified.
+
+faults:
+  certified: true
+  safety_critical: true
+  decision_use: A cell with an active fault must not be put to sleep.
+
+historical_kpi:
+  certified: true
+  safety_critical: false
+  decision_use: Typical load and sleep history per cell, for judging whether current low load is normal.
+
+traffic_forecast:
+  certified: true
+  safety_critical: false
+  decision_use: Do not put cells to sleep just before a load surge; wake sleeping cells ahead of it.
+
+interference:
+  certified: true
+  safety_critical: false
+  decision_use: Do not sleep a cell if the load it hands to neighbours would overload them.
+
+energy_pricing:
+  certified: true
+  safety_critical: false
+  decision_use: Sleeping saves more money when the electricity price tier is high.

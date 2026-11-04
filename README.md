@@ -81,6 +81,14 @@ Mobile operators need to reduce 5G RAN energy consumption during low-traffic per
    # Ablation — add one tool at a time
    python experiments/full_harness.py --rsg-host $RSG_HOST --tools historical_kpi
    python experiments/full_harness.py --rsg-host $RSG_HOST --tools historical_kpi traffic_forecast
+
+   # Discovery — the Planner chooses its own data from the catalog
+   python experiments/full_harness.py --rsg-host $RSG_HOST --discover
+   python -m eval.eval_discovery --runs 10    # score discovery alone, no RSG needed
+
+   # Policy tuning — search the harness thresholds on the mock RSG, then confirm on VIAVI
+   python experiments/tune_policy.py --trials 40
+   python experiments/full_harness_vtzcycle.py --rsg-host $RSG_HOST --intent "5 Mbps" --policy policies/tuned.yaml
    ```
 
 ### Local
@@ -116,6 +124,8 @@ The system is a fixed-pipeline tool-augmented agent harness. On each decision cy
 | Baseline C — digital twin only | Dual-LLM + VIAVI RSG (current blueprint architecture) |
 | Proposed — full harness | Dual-LLM + VIAVI RSG + all five tools |
 | Ablation | Digital twin + one tool added at a time |
+| Discovery | Full harness, but the Planner chooses its datasets from the data catalog before the first cycle |
+| Tuned | Full harness with thresholds from `policies/tuned.yaml`, found by `experiments/tune_policy.py` |
 
 **Software components:**
 
@@ -137,6 +147,8 @@ The system is a fixed-pipeline tool-augmented agent harness. On each decision cy
 |---|---|
 | `generators/` | Synthetic dataset generators — run once to produce `data/synthetic/` |
 | `tools/` | Runtime tool API modules (historical KPI, forecast, faults, interference, pricing) |
+| `policies/` | Harness threshold files: `default.yaml` (built-in values) and tuned policies |
+| `data/catalog_policy.yaml` | Reviewed catalog fields (certified, safety-critical, decision use), merged into the generated catalog |
 | `agent/` | Agent harness: context assembler, planner, validator, orchestration |
 | `experiments/` | Experiment runners — one script per experimental condition |
 | `analysis/` | Results analysis notebook producing publication-ready figures |

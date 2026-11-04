@@ -12,12 +12,17 @@ all five additional tools active:
 Pass --tools to run a subset for ablation experiments:
     python experiments/full_harness.py --tools historical_kpi traffic_forecast
 
+Pass --discover to let the Planner choose its own data from the catalog
+(data/synthetic/catalog.yaml) before the first cycle:
+    python experiments/full_harness.py --discover
+
 Run:
     python experiments/full_harness.py --intent "5 Mbps" --iterations 20
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 
 from dotenv import find_dotenv, load_dotenv
@@ -26,6 +31,9 @@ import pandas as pd
 
 from agent.harness   import AgentHarness
 from agent.context   import ALL_TOOLS
+from agent.catalog   import load_catalog
+from agent.discovery import add_discovery_args, discover
+from agent.policy    import DEFAULT_POLICY, Policy, load_policy
 from experiments.common import (
     get_llm, get_validator_llm, get_current_kpis, connect_scenario, make_run_dir,
     save_results, append_result, make_sim_fns, _kpi_to_text, apply_job_arguments,
@@ -41,6 +49,7 @@ def run(
     model: str | None = None,
     validator_model: str | None = None,
     run_dir=None,
+    policy: Policy | None = None,
 ) -> list[dict]:
     llm           = get_llm(model)
     validator_llm = get_validator_llm(validator_model)
@@ -53,6 +62,7 @@ def run(
         operator_intent=operator_intent,
         enabled_tools=enabled_tools,
         validator_llm=validator_llm,
+        policy=policy,
     )
 
     ts = pd.Timestamp.now().normalize()  # start of today; iterations advance virtually
@@ -106,11 +116,27 @@ def main():
         choices=list(ALL_TOOLS),
         help="Subset of tools to enable (default: all). Use for ablation runs.",
     )
+    add_discovery_args(parser)
+    parser.add_argument(
+        "--policy", default=None,
+        help="Policy file with the harness thresholds (e.g. policies/tuned.yaml). Default: built-in values.",
+    )
     args, _ = parser.parse_known_args()
+    policy = load_policy(args.policy)
 
     enabled    = frozenset(args.tools)
+    discovery  = None
+    if args.discover:
+        discovery = discover(get_llm(args.model), args.intent, load_catalog(args.catalog))
+        enabled   = discovery.enabled_tools
+        print(discovery.summary())
     model_slug = args.model.split("/")[-1] if args.model else os.getenv("LLM_MODEL", "llm").split("/")[-1]
-    label      = "full_harness" if enabled == ALL_TOOLS else "ablation_" + "_".join(sorted(enabled))
+    if discovery is not None:
+        label = "discovery_harness"
+    else:
+        label = "full_harness" if enabled == ALL_TOOLS else "ablation_" + "_".join(sorted(enabled))
+    if policy != DEFAULT_POLICY:
+        label += f"_{policy.name}"
     condition  = f"{label}__{model_slug}"
 
     scenario = connect_scenario(args.rsg_host)
@@ -120,8 +146,11 @@ def main():
     run_dir = make_run_dir(label, model_slug)
     print(f"Running: {condition}  planner={model_slug}  validator={val_slug}  tools={sorted(enabled)}  intent='{args.intent}'  iterations={args.iterations}")
     print(f"Saving incrementally to: {run_dir}")
+    if discovery is not None:
+        with open(run_dir / "discovery.json", "w") as f:
+            json.dump(discovery.to_dict(), f, indent=2)
     results = run(scenario, args.intent, args.iterations, enabled, condition, args.model,
-                  args.validator_model, run_dir=run_dir)
+                  args.validator_model, run_dir=run_dir, policy=policy)
     save_results(run_dir, results)
 
 
