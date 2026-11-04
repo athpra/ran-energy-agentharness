@@ -141,7 +141,8 @@ def main():
 
     scenario = connect_scenario(args.rsg_host)
 
-    val_slug = args.validator_model.split("/")[-1] if args.validator_model else model_slug
+    val_id   = args.validator_model or os.getenv("VALIDATOR_MODEL", "")  # same resolution as get_validator_llm
+    val_slug = val_id.split("/")[-1] if val_id else model_slug
 
     run_dir = make_run_dir(label, model_slug)
     print(f"Running: {condition}  planner={model_slug}  validator={val_slug}  tools={sorted(enabled)}  intent='{args.intent}'  iterations={args.iterations}")

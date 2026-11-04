@@ -197,7 +197,7 @@ def main():
     scenario = connect_scenario(args.rsg_host)
     run_dir  = make_run_dir(label, model_slug)
 
-    val_slug = args.validator_model.split("/")[-1] if args.validator_model else model_slug
+    val_slug = validator_id.split("/")[-1] if validator_id else model_slug  # same resolution as get_validator_llm
 
     save_run_config(run_dir, {
         "condition":       condition,
