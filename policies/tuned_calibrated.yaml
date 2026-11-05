@@ -1,0 +1,14 @@
+name: tuned_calibrated
+prb_sleep_threshold: 21.49
+prb_sleep_threshold_peak: 38.93
+throughput_headroom: 1.03
+surge_ratio: 2.08
+overload_threshold_pct: 89.59
+meta:
+  tuned_from: trial_031
+  tuning_run: tuning_20261105_095552
+  objective: energy
+  train_reward: 0.7321
+  holdout_reward: 0.6559
+  default_holdout_reward: 0.6118
+  simulator: mock_rsg (VIAVI-calibrated, 9 runs)

@@ -6,8 +6,11 @@ full 96-step traffic cycles. A candidate is promoted to policies/tuned.yaml
 only if it beats the default policy on HELD-OUT intents, with no more
 avoidable QoS violations there than the default has.
 
-Each trial runs on the mock RSG (mock_rsg/, calibrated to VIAVI) with two
-stand-ins, so a trial takes seconds and costs no inference:
+Each trial runs on the mock RSG with two stand-ins, so a trial takes seconds
+and costs no inference. The mock uses the VIAVI calibration in
+mock_rsg/viavi_calibration.json when it exists (python -m mock_rsg.calibrate
+output/run_*); without it, the analytic radio model, whose throughput levels
+differ from VIAVI's. The stand-ins:
   - Planner: returns [], so the harness uses its tool-derived candidates.
     That is what the LLM Planner does in most acting iterations today.
   - Validator: the rule in the Validator prompt's primary check: reject every
@@ -89,6 +92,14 @@ def evaluate(policy: Policy, intents: list[float], iterations: int, objective: s
     return {**mean, "per_intent": per_intent}
 
 
+def _simulator_name() -> str:
+    if os.environ.get("USE_MOCK_RSG") != "1":
+        return "viavi"
+    from mock_rsg.scenario import load_calibration
+    cal = load_calibration()
+    return f"mock_rsg (VIAVI-calibrated, {len(cal['source_runs'])} runs)" if cal else "mock_rsg (analytic)"
+
+
 def sample(rng: random.Random, trial: int) -> Policy:
     values = {k: round(rng.uniform(lo, hi), 2) for k, (lo, hi) in SEARCH_SPACE.items()}
     values["prb_sleep_threshold_peak"] = max(values["prb_sleep_threshold_peak"], values["prb_sleep_threshold"])
@@ -123,7 +134,7 @@ def main():
         trials_log.write(json.dumps({"policy": policy.name, **tunable_params(policy), "train": train}) + "\n")
         trials_log.flush()
 
-    print(f"Tuning on the mock RSG: {args.trials} trials, train intents {args.train_intents}, "
+    print(f"Tuning on {_simulator_name()}: {args.trials} trials, train intents {args.train_intents}, "
           f"held-out {args.holdout_intents}, objective={args.objective}")
     base_train = score(DEFAULT_POLICY, args.train_intents)
     log(DEFAULT_POLICY, base_train)
@@ -159,7 +170,7 @@ def main():
         "trials":          args.trials,
         "default":         {"params": tunable_params(DEFAULT_POLICY), "train": base_train, "holdout": base_hold},
         "best":            {"params": tunable_params(best), "train": best_train, "holdout": best_hold},
-        "simulator":       "mock_rsg" if os.environ.get("USE_MOCK_RSG") == "1" else "viavi",
+        "simulator":       _simulator_name(),
     }
     (run_dir / "report.json").write_text(json.dumps(report, indent=2))
 

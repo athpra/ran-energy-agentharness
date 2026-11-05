@@ -5,14 +5,23 @@ Implements the exact call surface that experiments/common.py uses — no HTTP,
 no VIAVI SDK dependency.  Activate by setting USE_MOCK_RSG=1 in the job
 environment (connect_scenario in common.py checks this flag).
 
-Radio model calibrated to match VIAVI observed values:
-    Night   (0.1× → 20 UEs,  21 N1 cells awake): tp ≈ 7.7 Mbps/UE
-    Morning (1.0× → 200 UEs, 21 N1 cells awake): tp ≈ 5.8 Mbps/UE
-    Evening (2.0× → 400 UEs, 17 cells awake):    tp ≈ 4.1 Mbps/UE
+Two radio models:
+  - VIAVI-calibrated (default when mock_rsg/viavi_calibration.json exists,
+    written by mock_rsg/calibrate.py): per traffic level, the throughput VIAVI
+    logged for each number of sleeping N1 cells, and each cell's logged PRB.
+    Deterministic, like VIAVI.
+  - Analytic (MOCK_RSG_CALIBRATION=none, or no calibration file): the formula
+    below, with load jitter between simulations. Anchored to a few VIAVI points:
+        Night   (0.1× → 20 UEs,  21 N1 cells awake): tp ≈ 7.7 Mbps/UE
+        Morning (1.0× → 200 UEs, 21 N1 cells awake): tp ≈ 5.8 Mbps/UE
+        Evening (2.0× → 400 UEs, 17 cells awake):    tp ≈ 4.1 Mbps/UE
+MOCK_RSG_CALIBRATION=<path> uses another calibration file.
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 import random
 from pathlib import Path
 
@@ -105,13 +114,55 @@ def _n12_prb(n_ues: int, n_awake_n1: int) -> float:
     return round(min(100.0, (displaced + normal) / n12_total / _N12_PRB_SAT_UES * 100.0), 1)
 
 
+# ── VIAVI calibration ─────────────────────────────────────────────────────────
+
+_CALIBRATION_PATH = Path(__file__).with_name("viavi_calibration.json")
+
+
+def load_calibration() -> dict | None:
+    env = os.getenv("MOCK_RSG_CALIBRATION", "").strip()
+    if env.lower() in ("none", "off", "0", "false"):
+        return None
+    path = Path(env) if env else _CALIBRATION_PATH
+    if not path.exists():
+        if env:
+            raise FileNotFoundError(f"MOCK_RSG_CALIBRATION={env}: no such file")
+        return None
+    return json.loads(path.read_text())
+
+
+def _calibrated_profile(cal: dict, ratio: float) -> dict:
+    """The calibrated traffic level nearest to this UE ratio. The harness only
+    uses the profile ratios VIAVI ran, so the nearest one is an exact match."""
+    key = min(cal["profiles"], key=lambda k: abs(float(k) - ratio))
+    if abs(float(key) - ratio) > 0.05:
+        raise ValueError(f"no calibrated traffic level near {ratio:g}× (have {sorted(cal['profiles'])})")
+    return cal["profiles"][key]
+
+
+def calibrated_throughput(profile: dict, n_sleeping: int) -> float:
+    """Calibrated throughput for one traffic level: interpolated between the
+    observed sleeping counts, extended with the fitted line outside them."""
+    obs = sorted((int(n), tp) for n, tp in profile["tp_by_sleeping_mbps"].items())
+    drop = profile["tp_drop_per_sleeping"]
+    if n_sleeping <= obs[0][0]:
+        return obs[0][1] + drop * (obs[0][0] - n_sleeping)
+    if n_sleeping >= obs[-1][0]:
+        return obs[-1][1] - drop * (n_sleeping - obs[-1][0])
+    for (n0, t0), (n1, t1) in zip(obs, obs[1:]):
+        if n0 <= n_sleeping <= n1:
+            return t0 + (t1 - t0) * (n_sleeping - n0) / (n1 - n0)
+    raise AssertionError
+
+
 # ── MockSimulation ─────────────────────────────────────────────────────────────
 
 class MockSimulation:
     """Single simulation session — one-shot: start → commands → run_for → query → finish."""
 
-    def __init__(self, sim_id: str, n_ues: int) -> None:
+    def __init__(self, sim_id: str, n_ues: int, calibrated: dict | None = None) -> None:
         self._id       = sim_id
+        self._cal      = calibrated             # calibrated traffic level, or None
         self._sleeping: set[str] = set()   # N1 cell names currently off
         self._t        = 0                  # simulated seconds elapsed
         self._pause_no = 0
@@ -120,7 +171,7 @@ class MockSimulation:
         # Each sim instance gets a different effective UE count so Sim-1 / Sim-2
         # diverge slightly, giving the Validator genuine uncertainty on proposals
         # that sit near the QoS threshold.
-        jitter = self._rng.gauss(1.0, _LOAD_JITTER_FRAC)
+        jitter = 1.0 if calibrated else self._rng.gauss(1.0, _LOAD_JITTER_FRAC)
         self._n_ues = max(1, int(n_ues * jitter))
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -171,13 +222,17 @@ class MockSimulation:
         if n_ues == 0:
             return pd.DataFrame(columns=["DRB.UEThpDl", "Viavi.Cell.Name"])
 
-        tp_mean = _tp_per_ue(n_ues, n_awake_n1)
+        if self._cal:
+            tp_mean = max(0.1, calibrated_throughput(self._cal, len(_N1_NAMES) - n_awake_n1))
+        else:
+            tp_mean = _tp_per_ue(n_ues, n_awake_n1)
+        noise_frac = 0.0 if self._cal else _TP_NOISE_FRAC
         awake_n1 = [c for c in _N1_NAMES if c not in self._sleeping] or _N1_NAMES[:1]
 
         rows = []
         for i in range(n_ues):
             cell = awake_n1[i % len(awake_n1)]
-            noise = self._rng.gauss(0, tp_mean * _TP_NOISE_FRAC)
+            noise = self._rng.gauss(0, tp_mean * noise_frac) if noise_frac else 0.0
             rows.append({
                 "DRB.UEThpDl":    max(0.1, tp_mean + noise),
                 "Viavi.Cell.Name": cell,
@@ -193,6 +248,8 @@ class MockSimulation:
             sleeping = name in self._sleeping
             if sleeping:
                 prb = 0.0
+            elif self._cal and self._cal["n1_prb"][i] is not None:
+                prb = self._cal["n1_prb"][i]
             else:
                 # Per-cell PRB scaled by cell load factor — creates spatial variation
                 # so only a subset of cells qualify for sleep at any given time.
@@ -235,7 +292,10 @@ class Scenario:
     def __init__(self, config_path: str, rsg_address: str = "mock://") -> None:
         self._sim_counter = 0
         self.config = self._load_config(config_path)
-        log.info("Mock RSG ready. rsg_address=%s  config=%s", rsg_address, config_path)
+        self._base_ues = self._total_ues()      # before any traffic profile is applied
+        self.calibration = load_calibration()
+        log.info("Mock RSG ready. rsg_address=%s  config=%s  radio model=%s", rsg_address, config_path,
+                 "VIAVI-calibrated" if self.calibration else "analytic")
 
     @staticmethod
     def _load_config(path: str) -> dict:
@@ -268,4 +328,6 @@ class Scenario:
         log.info(
             "Starting a new simulation for Scenario with 2 layers, static + indoor UE v5"
         )
-        return MockSimulation(sim_id, n_ues)
+        cal = (_calibrated_profile(self.calibration, n_ues / self._base_ues)
+               if self.calibration else None)
+        return MockSimulation(sim_id, n_ues, cal)

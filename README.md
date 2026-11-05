@@ -86,7 +86,9 @@ Mobile operators need to reduce 5G RAN energy consumption during low-traffic per
    python experiments/full_harness.py --rsg-host $RSG_HOST --discover
    python -m eval.eval_discovery --runs 10    # score discovery alone, no RSG needed
 
-   # Policy tuning — search the harness thresholds on the mock RSG, then confirm on VIAVI
+   # Policy tuning — calibrate the mock RSG from VIAVI runs, search the harness
+   # thresholds on it, then confirm on VIAVI
+   python -m mock_rsg.calibrate output/run_*     # writes mock_rsg/viavi_calibration.json
    python experiments/tune_policy.py --trials 40
    python experiments/full_harness_vtzcycle.py --rsg-host $RSG_HOST --intent "5 Mbps" --policy policies/tuned.yaml
    ```
@@ -148,6 +150,7 @@ The system is a fixed-pipeline tool-augmented agent harness. On each decision cy
 | `generators/` | Synthetic dataset generators — run once to produce `data/synthetic/` |
 | `tools/` | Runtime tool API modules (historical KPI, forecast, faults, interference, pricing) |
 | `policies/` | Harness threshold files: `default.yaml` (built-in values) and tuned policies |
+| `mock_rsg/` | Mock VIAVI RSG for tuning and tests; `viavi_calibration.json` fits it to logged VIAVI runs (`python -m mock_rsg.calibrate`) |
 | `data/catalog_policy.yaml` | Reviewed catalog fields (certified, safety-critical, decision use), merged into the generated catalog |
 | `agent/` | Agent harness: context assembler, planner, validator, orchestration |
 | `experiments/` | Experiment runners — one script per experimental condition |
