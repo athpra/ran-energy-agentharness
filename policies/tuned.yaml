@@ -1,0 +1,20 @@
+# REJECTED: kept as the record of tuning on the analytic mock, which ranks
+# policies in the wrong order (analysis/results.ipynb, section 9).
+# Tuned on the uncalibrated mock_rsg. On VIAVI at 5 Mbps it scored 0.517
+# reward against 0.645 for the default: the 1.27 throughput headroom blocks
+# every sleep at 09:00-13:00 and 20:00-22:00. Use tuned_calibrated.yaml.
+
+name: tuned
+prb_sleep_threshold: 27.35
+prb_sleep_threshold_peak: 37.54
+throughput_headroom: 1.27
+surge_ratio: 1.71
+overload_threshold_pct: 84.68
+meta:
+  tuned_from: trial_017
+  tuning_run: tuning_20261103_154622
+  objective: energy
+  train_reward: 0.4236
+  holdout_reward: 0.3782
+  default_holdout_reward: 0.359
+  simulator: mock_rsg
