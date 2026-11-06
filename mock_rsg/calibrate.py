@@ -3,8 +3,12 @@ Calibrate the mock RSG against VIAVI runs.
 
 Reads the per-iteration KPIs that VIAVI runs already log, and fits, for each
 traffic level (the profile's UE ratio):
-  - throughput by number of sleeping N1 cells: the mean of the logged points
-    at each count, with a least-squares line for counts never observed;
+  - throughput for each set of sleeping N1 cells VIAVI was run with. VIAVI is
+    deterministic, so the mock reproduces any logged state exactly;
+  - throughput by number of sleeping N1 cells, for sets never logged: the mean
+    of the logged points at each count, with a least-squares line for counts
+    never observed. Different sets with the same count differ in throughput,
+    so this is an estimate;
   - each N1 cell's PRB utilisation while awake. On VIAVI it does not change
     when neighbours sleep, so one value per cell and traffic level is enough.
 
@@ -44,6 +48,13 @@ def _is_mock_run(iterations: list[dict]) -> bool:
     return False
 
 
+def _sleeping_key(state: dict) -> str:
+    """The sleeping N1 cells of a state, as sorted cell indices: "0,2,4".
+    Cell index j is the j-th site in sorted order, the same as the mock's."""
+    return ",".join(str(j) for j, key in enumerate(sorted(state["per_site"]))
+                    if state["per_site"][key].get("n1_sleeping"))
+
+
 def _states(run_dir: Path):
     """(ue_ratio, kpi state) for every logged pre/post state of one run."""
     path = run_dir / "iterations.jsonl"
@@ -78,6 +89,7 @@ def _fit_line(points: list[tuple[int, float]]) -> tuple[float, float]:
 
 def calibrate(run_dirs: list[Path]) -> dict:
     tp_points: dict[float, list[tuple[int, float]]] = defaultdict(list)
+    tp_sets: dict[float, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     prb: dict[float, dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
     used = []
     for d in run_dirs:
@@ -87,6 +99,7 @@ def calibrate(run_dirs: list[Path]) -> dict:
         used.append(Path(d).name)
         for ratio, state in states:
             tp_points[ratio].append((state["sleeping_cells"], state["avg_throughput_mbps"]))
+            tp_sets[ratio][_sleeping_key(state)].append(state["avg_throughput_mbps"])
             for j, key in enumerate(sorted(state["per_site"])):
                 site = state["per_site"][key]
                 if not site.get("n1_sleeping"):
@@ -103,7 +116,10 @@ def calibrate(run_dirs: list[Path]) -> dict:
         by_n: dict[int, list[float]] = defaultdict(list)
         for x, y in pts:
             by_n[x].append(y)
+        sets = tp_sets[ratio]
         profiles[f"{ratio:g}"] = {
+            "tp_by_sleeping_set_mbps": {k: round(statistics.mean(v), 3) for k, v in sorted(sets.items())},
+            "max_set_spread_mbps":   round(max(max(v) - min(v) for v in sets.values()), 3),
             "tp_by_sleeping_mbps":   {str(n): round(statistics.mean(v), 3) for n, v in sorted(by_n.items())},
             "tp_all_awake_mbps":     round(tp0, 3),
             "tp_drop_per_sleeping":  round(drop, 4),
@@ -127,7 +143,8 @@ def main():
     print(f"✓ Calibration from {len(cal['source_runs'])} VIAVI runs → {args.out}")
     for ratio, p in cal["profiles"].items():
         obs = p["tp_by_sleeping_mbps"]
-        print(f"  load {ratio:>4}×  {p['n_points']:>3} points  tp with 0 asleep "
+        print(f"  load {ratio:>4}×  {p['n_points']:>3} points, {len(p['tp_by_sleeping_set_mbps']):>3} sleeping sets "
+              f"(spread within a set {p['max_set_spread_mbps']:.3f} Mbps)  tp with 0 asleep "
               f"{obs.get('0', p['tp_all_awake_mbps']):.2f} Mbps, sleeping counts seen {list(obs)}")
 
 

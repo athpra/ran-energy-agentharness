@@ -8,7 +8,8 @@ environment (connect_scenario in common.py checks this flag).
 Two radio models:
   - VIAVI-calibrated (default when mock_rsg/viavi_calibration.json exists,
     written by mock_rsg/calibrate.py): per traffic level, the throughput VIAVI
-    logged for each number of sleeping N1 cells, and each cell's logged PRB.
+    logged for the same set of sleeping N1 cells, or, for a set never logged,
+    for the same number of sleeping cells; and each cell's logged PRB.
     Deterministic, like VIAVI.
   - Analytic (MOCK_RSG_CALIBRATION=none, or no calibration file): the formula
     below, with load jitter between simulations. Anchored to a few VIAVI points:
@@ -140,9 +141,13 @@ def _calibrated_profile(cal: dict, ratio: float) -> dict:
     return cal["profiles"][key]
 
 
-def calibrated_throughput(profile: dict, n_sleeping: int) -> float:
-    """Calibrated throughput for one traffic level: interpolated between the
-    observed sleeping counts, extended with the fitted line outside them."""
+def calibrated_throughput(profile: dict, n_sleeping: int, sleeping_key: str | None = None) -> float:
+    """Calibrated throughput for one traffic level: the logged value when VIAVI
+    ran this exact set of sleeping cells ("0,2,4"), otherwise interpolated between
+    the observed sleeping counts and extended with the fitted line outside them."""
+    logged = profile.get("tp_by_sleeping_set_mbps", {})
+    if sleeping_key is not None and sleeping_key in logged:
+        return logged[sleeping_key]
     obs = sorted((int(n), tp) for n, tp in profile["tp_by_sleeping_mbps"].items())
     drop = profile["tp_drop_per_sleeping"]
     if n_sleeping <= obs[0][0]:
@@ -223,7 +228,8 @@ class MockSimulation:
             return pd.DataFrame(columns=["DRB.UEThpDl", "Viavi.Cell.Name"])
 
         if self._cal:
-            tp_mean = max(0.1, calibrated_throughput(self._cal, len(_N1_NAMES) - n_awake_n1))
+            key = ",".join(str(i) for i, c in enumerate(_N1_NAMES) if c in self._sleeping)
+            tp_mean = max(0.1, calibrated_throughput(self._cal, len(_N1_NAMES) - n_awake_n1, key))
         else:
             tp_mean = _tp_per_ue(n_ues, n_awake_n1)
         noise_frac = 0.0 if self._cal else _TP_NOISE_FRAC

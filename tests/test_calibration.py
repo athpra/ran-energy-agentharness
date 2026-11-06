@@ -29,6 +29,13 @@ def test_throughput_interpolates_inside_and_extends_outside_the_observed_counts(
     assert abs(calibrated_throughput(PROFILE, 12) - 4.6) < 1e-9
 
 
+def test_throughput_uses_the_logged_value_for_a_logged_set_of_sleeping_cells():
+    profile = {**PROFILE, "tp_by_sleeping_set_mbps": {"1,3": 5.9}}
+    assert calibrated_throughput(profile, 2, "1,3") == 5.9            # logged set: exact
+    assert abs(calibrated_throughput(profile, 2, "0,1") - 5.8) < 1e-9  # same count, not logged
+    assert abs(calibrated_throughput(PROFILE, 2, "1,3") - 5.8) < 1e-9  # older file without sets
+
+
 def test_fit_line_reports_a_non_negative_drop():
     tp0, drop = _fit_line([(0, 7.0), (10, 6.0), (20, 5.0)])
     assert abs(tp0 - 7.0) < 1e-9 and abs(drop - 0.1) < 1e-9
