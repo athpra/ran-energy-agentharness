@@ -15,6 +15,12 @@ traffic level (the profile's UE ratio):
 The mock (mock_rsg/scenario.py) uses the result when it exists, so the policy
 tuner sees VIAVI's throughput levels instead of the analytic radio model.
 
+Runs from an older VIAVI setup or traffic schedule would mix in different
+values, so each run is checked against a reference run (the newest, unless
+--reference names another): a run is left out when, on the states and cells
+both logged, its throughput differs by more than TP_TOLERANCE_MBPS or a cell's
+PRB by more than PRB_TOLERANCE_PCT. Left-out runs are listed in the output.
+
 Run (VIAVI runs only; mock runs are skipped):
     python -m mock_rsg.calibrate output/run_*
     python -m mock_rsg.calibrate output/run_2026092* --out /tmp/calibration.json
@@ -37,6 +43,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from experiments.common import _get_profile  # noqa: E402
 
 CALIBRATION_PATH = Path(__file__).with_name("viavi_calibration.json")
+TP_TOLERANCE_MBPS = 0.1   # runs of the same setup agree within ~0.04 Mbps
+PRB_TOLERANCE_PCT = 6.0   # and within ~4 PRB points; older setups differ by 10–90
 
 
 def _is_mock_run(iterations: list[dict]) -> bool:
@@ -87,26 +95,55 @@ def _fit_line(points: list[tuple[int, float]]) -> tuple[float, float]:
     return my + drop * mx, drop
 
 
-def calibrate(run_dirs: list[Path]) -> dict:
+def _run_tables(states: list) -> tuple[dict, dict]:
+    """Throughput per (ratio, sleeping set) and median PRB per (ratio, cell) of one run."""
+    tp: dict[tuple, list[float]] = defaultdict(list)
+    prb: dict[tuple, list[float]] = defaultdict(list)
+    for ratio, state in states:
+        tp[(ratio, _sleeping_key(state))].append(state["avg_throughput_mbps"])
+        for j, key in enumerate(sorted(state["per_site"])):
+            if not state["per_site"][key].get("n1_sleeping"):
+                prb[(ratio, j)].append(state["per_site"][key]["n1_prb"])
+    return ({k: statistics.mean(v) for k, v in tp.items()},
+            {k: statistics.median(v) for k, v in prb.items()})
+
+
+def _disagreement(run: tuple[dict, dict], ref: tuple[dict, dict]) -> str | None:
+    """Why a run disagrees with the reference run, or None if it agrees."""
+    (tp, prb), (ref_tp, ref_prb) = run, ref
+    dtp = max((abs(v - ref_tp[k]) for k, v in tp.items() if k in ref_tp), default=0.0)
+    dprb = max((abs(v - ref_prb[k]) for k, v in prb.items() if k in ref_prb), default=0.0)
+    if dtp > TP_TOLERANCE_MBPS:
+        return f"throughput differs by {dtp:.3f} Mbps on the same state"
+    if dprb > PRB_TOLERANCE_PCT:
+        return f"a cell's PRB differs by {dprb:.1f} points"
+    return None
+
+
+def calibrate(run_dirs: list[Path], reference: Path | None = None) -> dict:
+    runs = {Path(d).name: s for d in sorted(run_dirs, key=lambda d: Path(d).name)
+            if (s := _states(Path(d)))}
+    if not runs:
+        raise ValueError("no VIAVI runs found")
+    ref_name = Path(reference).name if reference else list(runs)[-1]   # newest by timestamp
+    if ref_name not in runs:
+        raise ValueError(f"reference run {ref_name} has no VIAVI KPIs")
+    tables = {name: _run_tables(s) for name, s in runs.items()}
+    excluded = {name: why for name in runs
+                if (why := _disagreement(tables[name], tables[ref_name]))}
+
     tp_points: dict[float, list[tuple[int, float]]] = defaultdict(list)
     tp_sets: dict[float, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     prb: dict[float, dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
-    used = []
-    for d in run_dirs:
-        states = _states(Path(d))
-        if not states:
-            continue
-        used.append(Path(d).name)
-        for ratio, state in states:
+    used = [name for name in runs if name not in excluded]
+    for name in used:
+        for ratio, state in runs[name]:
             tp_points[ratio].append((state["sleeping_cells"], state["avg_throughput_mbps"]))
             tp_sets[ratio][_sleeping_key(state)].append(state["avg_throughput_mbps"])
             for j, key in enumerate(sorted(state["per_site"])):
                 site = state["per_site"][key]
                 if not site.get("n1_sleeping"):
                     prb[ratio][j].append(site["n1_prb"])
-    if not used:
-        raise ValueError("no VIAVI runs found")
-
     n_cells = 1 + max(j for cells in prb.values() for j in cells)
     profiles = {}
     for ratio in sorted(tp_points):
@@ -129,18 +166,24 @@ def calibrate(run_dirs: list[Path]) -> dict:
             "n1_prb": [round(statistics.median(prb[ratio][j]), 1) if prb[ratio].get(j) else None
                        for j in range(n_cells)],
         }
-    return {"source_runs": used, "n1_cells": n_cells, "profiles": profiles}
+    return {"source_runs": used, "reference_run": ref_name, "excluded_runs": excluded,
+            "n1_cells": n_cells, "profiles": profiles}
 
 
 def main():
     parser = argparse.ArgumentParser(description="Calibrate the mock RSG against VIAVI runs")
     parser.add_argument("run_dirs", nargs="+", type=Path)
     parser.add_argument("--out", type=Path, default=CALIBRATION_PATH)
+    parser.add_argument("--reference", type=Path, default=None,
+                        help="Run whose VIAVI setup the others must match (default: the newest)")
     args = parser.parse_args()
 
-    cal = calibrate(args.run_dirs)
+    cal = calibrate(args.run_dirs, args.reference)
     args.out.write_text(json.dumps(cal, indent=2) + "\n")
     print(f"✓ Calibration from {len(cal['source_runs'])} VIAVI runs → {args.out}")
+    print(f"  reference run {cal['reference_run']}")
+    for name, why in cal["excluded_runs"].items():
+        print(f"  left out {name}: {why}")
     for ratio, p in cal["profiles"].items():
         obs = p["tp_by_sleeping_mbps"]
         print(f"  load {ratio:>4}×  {p['n_points']:>3} points, {len(p['tp_by_sleeping_set_mbps']):>3} sleeping sets "

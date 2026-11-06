@@ -17,7 +17,7 @@ os.environ["USE_MOCK_RSG"] = "1"
 from agent.policy import DEFAULT_POLICY  # noqa: E402
 from experiments.common import connect_scenario  # noqa: E402
 from experiments.tune_policy import evaluate  # noqa: E402
-from mock_rsg.calibrate import _fit_line  # noqa: E402
+from mock_rsg.calibrate import _disagreement, _fit_line  # noqa: E402
 from mock_rsg.scenario import calibrated_throughput  # noqa: E402
 
 PROFILE = {"tp_by_sleeping_mbps": {"0": 6.0, "10": 5.0}, "tp_drop_per_sleeping": 0.2}
@@ -40,6 +40,14 @@ def test_fit_line_reports_a_non_negative_drop():
     tp0, drop = _fit_line([(0, 7.0), (10, 6.0), (20, 5.0)])
     assert abs(tp0 - 7.0) < 1e-9 and abs(drop - 0.1) < 1e-9
     assert _fit_line([(4, 5.0), (4, 6.0)]) == (5.5, 0.0)
+
+
+def test_runs_from_another_viavi_setup_are_left_out():
+    ref = ({(1.0, "0,2"): 5.20}, {(1.0, 1): 20.0})
+    assert _disagreement(({(1.0, "0,2"): 5.23}, {(1.0, 1): 22.0}), ref) is None   # same setup
+    assert "throughput" in _disagreement(({(1.0, "0,2"): 5.40}, {(1.0, 1): 20.0}), ref)
+    assert "PRB" in _disagreement(({(1.0, "4"): 6.0}, {(1.0, 1): 40.0}), ref)
+    assert _disagreement(({(0.1, ""): 7.7}, {(0.1, 1): 3.0}), ref) is None        # nothing shared
 
 
 def test_calibration_can_be_switched_off():

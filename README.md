@@ -88,7 +88,7 @@ Mobile operators need to reduce 5G RAN energy consumption during low-traffic per
 
    # Policy tuning — calibrate the mock RSG from VIAVI runs, search the harness
    # thresholds on it, then confirm on VIAVI
-   python -m mock_rsg.calibrate output/run_*     # writes mock_rsg/viavi_calibration.json
+   python -m mock_rsg.calibrate output/run_*     # writes mock_rsg/viavi_calibration.json; leaves out runs from older VIAVI setups
    python experiments/tune_policy.py --trials 40
    python experiments/full_harness_vtzcycle.py --rsg-host $RSG_HOST --intent "5 Mbps" --policy policies/tuned.yaml
    ```

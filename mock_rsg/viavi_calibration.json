@@ -10,6 +10,8 @@
     "run_20260927_182655_baseline_rules_rules",
     "run_20260928_002415_full_harness_vtzcycle_nemotron-3-super-120b-a12b"
   ],
+  "reference_run": "run_20260928_002415_full_harness_vtzcycle_nemotron-3-super-120b-a12b",
+  "excluded_runs": {},
   "n1_cells": 21,
   "profiles": {
     "0.1": {
