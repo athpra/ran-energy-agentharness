@@ -18,6 +18,7 @@ import argparse
 import os
 
 import pandas as pd
+from dotenv import find_dotenv, load_dotenv
 
 from agent.harness  import AgentHarness
 from agent.planner  import BLUEPRINT_SYSTEM_PROMPT
@@ -129,6 +130,9 @@ def run(
 
 
 def main():
+    # Load .env first, so LLM_MODEL below is the model get_llm() will use and
+    # run_config.json records it
+    load_dotenv(find_dotenv(), override=True)
     apply_job_arguments()
     parser = argparse.ArgumentParser(
         description="Baseline C: digital twin only — VTZ-cycle variant"

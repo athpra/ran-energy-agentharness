@@ -15,6 +15,7 @@ import os
 import time
 
 import pandas as pd
+from dotenv import find_dotenv, load_dotenv
 
 from agent.planner import plan
 from experiments.common import (
@@ -177,6 +178,9 @@ def run(
 
 
 def main():
+    # Load .env first, so LLM_MODEL below is the model get_llm() will use and
+    # run_config.json records it
+    load_dotenv(find_dotenv(), override=True)
     apply_job_arguments()
     parser = argparse.ArgumentParser(
         description="Baseline B: open-loop LLM — VTZ-cycle variant"
