@@ -86,13 +86,12 @@ Mobile operators need to reduce 5G RAN energy consumption during low-traffic per
    python experiments/full_harness.py --rsg-host $RSG_HOST --discover
    python -m eval.eval_discovery --runs 10    # score discovery alone, no RSG needed
 
-   # Benchmark models' discovery: each model in four modes, then one table.
-   # --no-policy hides the certified decision-use hints; --hard adds near-miss distractors
-   python -m eval.eval_discovery --model <id> --api-base <endpoint-url>   # --api-base if the model has its own endpoint
-   python -m eval.eval_discovery --model <id> --no-policy
-   python -m eval.eval_discovery --model <id> --hard
-   python -m eval.eval_discovery --model <id> --hard --no-policy
-   python -m eval.compare_models eval/results/discovery_*.json
+   # Benchmark several models on every eval (Planner, Validator, discovery in five
+   # modes) into one folder and one table. List the models first; to include the
+   # LLM-drafted catalog, draft it once with one model.
+   cp eval/models.example.yaml eval/models.yaml
+   python generators/profile_catalog.py
+   python -m eval.benchmark --models eval/models.yaml
 
    # A new kind of data with no new code: tonight's maintenance schedule is read
    # by the cell_blocker role reader through its certified catalog entry.

@@ -6,6 +6,10 @@ and saves a timestamped JSON result file that includes full model metadata.
 
 Usage:
     python -m eval.run_evals [--output eval/results/]
+    python -m eval.run_evals --model <id> --api-base <endpoint-url>
+
+To run every eval (this one and discovery) on several models, see
+eval/benchmark.py.
 
 The saved JSON can be compared across models using eval/compare_models.py.
 """
@@ -46,13 +50,14 @@ def run_evals(
     planner_only: bool     = False,
     validator_only: bool   = False,
     verbose: bool          = True,
+    llm=None,
 ) -> dict:
     """
     Run the full eval suite and return the result dict.
     Also writes a JSON file to output_dir.
     """
     load_dotenv(find_dotenv(), override=True)
-    llm = get_llm()
+    llm = llm or get_llm()
 
     now    = datetime.now(timezone.utc)
     run_id = now.strftime("%Y%m%d_%H%M%S")
@@ -111,6 +116,9 @@ def main():
     parser.add_argument("--planner-only",   action="store_true")
     parser.add_argument("--validator-only", action="store_true")
     parser.add_argument("--quiet",    action="store_true",    help="Suppress per-scenario output")
+    parser.add_argument("--model",    default=None, help="Model ID (default: LLM_MODEL in .env)")
+    parser.add_argument("--api-base", default=None,
+                        help="Endpoint URL serving --model (default: CDSW_API_URL in .env)")
     args = parser.parse_args()
 
     run_evals(
@@ -119,6 +127,7 @@ def main():
         planner_only=args.planner_only,
         validator_only=args.validator_only,
         verbose=not args.quiet,
+        llm=get_llm(args.model, args.api_base) if (args.model or args.api_base) else None,
     )
 
 

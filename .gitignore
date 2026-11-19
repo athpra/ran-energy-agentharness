@@ -42,3 +42,6 @@ paper/*.bbl
 paper/*.blg
 paper/*.out
 paper/*.pdf
+
+# Benchmark model list (internal endpoint URLs); eval/models.example.yaml is the template
+eval/models.yaml

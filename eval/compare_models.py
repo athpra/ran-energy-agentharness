@@ -80,7 +80,8 @@ def compare_discovery(results: list[dict]) -> None:
             "most missed": _top(missed),
             "distractors chosen": _top(chosen),
         })
-    rows.sort(key=lambda x: (x["model"], x["catalog"], x["policy"] == "off"))
+    difficulty = {"catalog": 0, "catalog_hard": 1, "catalog_draft": 2}   # easiest first
+    rows.sort(key=lambda x: (x["model"], difficulty.get(x["catalog"], 3), x["catalog"], x["policy"] == "off"))
     print("\n═══ Discovery Scores ═══")
     print("(precision/recall: means over runs; safety_miss, distractor, unparsed: share of runs)")
     _print_table(rows, ["model", "catalog", "policy", "runs", "precision", "recall", "safety_miss",

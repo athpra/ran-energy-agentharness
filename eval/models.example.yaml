@@ -1,0 +1,13 @@
+# Models for eval/benchmark.py. Copy to eval/models.yaml and list yours.
+#
+#   id        the model ID the endpoint serves (its /models list shows it)
+#   api_base  the endpoint URL; leave it out to use CDSW_API_URL from .env.
+#             On Cloudera AI Inference each model usually has its own endpoint.
+#
+# Authentication is the same for every model: the CML JWT (/tmp/jwt), or
+# CDSW_API_KEY when AUTH_MODE = "api_key".
+
+models:
+  - id: nvidia/nemotron-3-super-120b-a12b      # the default endpoint
+  # - id: <model-id>
+  #   api_base: https://<inference-domain>/namespaces/serving-default/endpoints/<endpoint-name>/v1

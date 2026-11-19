@@ -112,15 +112,22 @@ def main():
         sys.exit(f"No catalog at {args.catalog}. Run python generators/generate_catalog.py first.")
 
     from experiments.common import get_llm
-    llm = get_llm(args.model, args.api_base)
-    catalog = load_catalog(args.catalog, None if args.no_policy else POLICY_PATH)
-    certified = load_catalog(args.catalog)
+    evaluate(get_llm(args.model, args.api_base), args.catalog, args.no_policy, args.runs,
+             args.intent, args.output)
+
+
+def evaluate(llm, catalog_path: Path, no_policy: bool, runs: int, intent: str = "5 Mbps",
+             output: Path = Path("eval/results"), verbose: bool = True) -> Path:
+    """One model on one catalog and policy mode; returns the results file."""
+    catalog_path = Path(catalog_path)
+    catalog = load_catalog(catalog_path, None if no_policy else POLICY_PATH)
+    certified = load_catalog(catalog_path)
     critical = {n for n, e in certified.items() if e["safety_critical"]}
     relevant = relevant_datasets(certified)
 
-    print(f"Discovery eval: {args.runs} runs, catalog={args.catalog}, "
-          f"policy={'off' if args.no_policy else 'on'}, model={llm.model_name}")
-    summary = run_discovery_eval(catalog, critical, llm, args.intent, args.runs, relevant=relevant)
+    print(f"Discovery eval: {runs} runs, catalog={catalog_path}, "
+          f"policy={'off' if no_policy else 'on'}, model={llm.model_name}")
+    summary = run_discovery_eval(catalog, critical, llm, intent, runs, verbose=verbose, relevant=relevant)
     print(f"\nmean precision={summary['mean_precision']:.2f}  mean recall={summary['mean_recall']:.2f}  "
           f"safety-critical miss rate={summary['safety_critical_miss_rate']:.0%}  "
           f"runs choosing a distractor={summary['distractor_rate']:.0%}  "
@@ -128,22 +135,23 @@ def main():
 
     now = datetime.now(timezone.utc)
     model_slug = llm.model_name.split("/")[-1] or "llm"
-    out = args.output / (f"discovery_{now.strftime('%Y%m%d_%H%M%S')}_{model_slug}_"
-                         f"{args.catalog.stem}_{'nopolicy' if args.no_policy else 'policy'}.json")
+    out = Path(output) / (f"discovery_{now.strftime('%Y%m%d_%H%M%S')}_{model_slug}_"
+                          f"{catalog_path.stem}_{'nopolicy' if no_policy else 'policy'}.json")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({
         "timestamp": now.isoformat(),
         "model_id":  llm.model_name,
-        "api_base":  str(llm.openai_api_base or ""),
-        "catalog":   str(args.catalog),
-        "catalog_name": args.catalog.stem,
-        "runs_requested": args.runs,
+        "api_base":  str(getattr(llm, "openai_api_base", "") or ""),
+        "catalog":   str(catalog_path),
+        "catalog_name": catalog_path.stem,
+        "runs_requested": runs,
         "temperature": getattr(llm, "temperature", None),
-        "policy":    not args.no_policy,
-        "intent":    args.intent,
+        "policy":    not no_policy,
+        "intent":    intent,
         **summary,
     }, indent=2))
     print(f"Saved → {out}")
+    return out
 
 
 if __name__ == "__main__":
