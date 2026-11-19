@@ -7,7 +7,7 @@ choices: a dataset is relevant when a harness tool or a certified role reader
 LLM endpoint, not the VIAVI RSG.
 
 To benchmark models, run each one in all four modes and compare the files:
-    python -m eval.eval_discovery --model <id>                     # certified catalog
+    python -m eval.eval_discovery --model <id> --api-base <url>    # certified catalog
     python -m eval.eval_discovery --model <id> --no-policy         # descriptions only
     python -m eval.eval_discovery --model <id> --hard              # + near-miss distractors
     python -m eval.eval_discovery --model <id> --hard --no-policy  # hardest
@@ -99,7 +99,10 @@ def main():
                         help="Ignore data/catalog_policy.yaml: nothing certified, no decision_use shown")
     parser.add_argument("--runs",      type=int, default=10)
     parser.add_argument("--intent",    default="5 Mbps")
-    parser.add_argument("--model",     default=None)
+    parser.add_argument("--model",     default=None, help="Model ID (default: LLM_MODEL in .env)")
+    parser.add_argument("--api-base",  default=None,
+                        help="Endpoint URL serving --model (default: CDSW_API_URL in .env). On Cloudera "
+                             "AI Inference each model usually has its own endpoint URL")
     parser.add_argument("--output",    type=Path, default=Path("eval/results"))
     args = parser.parse_args()
 
@@ -109,7 +112,7 @@ def main():
         sys.exit(f"No catalog at {args.catalog}. Run python generators/generate_catalog.py first.")
 
     from experiments.common import get_llm
-    llm = get_llm(args.model)
+    llm = get_llm(args.model, args.api_base)
     catalog = load_catalog(args.catalog, None if args.no_policy else POLICY_PATH)
     certified = load_catalog(args.catalog)
     critical = {n for n, e in certified.items() if e["safety_critical"]}
@@ -131,6 +134,7 @@ def main():
     out.write_text(json.dumps({
         "timestamp": now.isoformat(),
         "model_id":  llm.model_name,
+        "api_base":  str(llm.openai_api_base or ""),
         "catalog":   str(args.catalog),
         "catalog_name": args.catalog.stem,
         "runs_requested": args.runs,

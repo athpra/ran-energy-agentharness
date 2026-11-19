@@ -88,7 +88,7 @@ Mobile operators need to reduce 5G RAN energy consumption during low-traffic per
 
    # Benchmark models' discovery: each model in four modes, then one table.
    # --no-policy hides the certified decision-use hints; --hard adds near-miss distractors
-   python -m eval.eval_discovery --model <id>
+   python -m eval.eval_discovery --model <id> --api-base <endpoint-url>   # --api-base if the model has its own endpoint
    python -m eval.eval_discovery --model <id> --no-policy
    python -m eval.eval_discovery --model <id> --hard
    python -m eval.eval_discovery --model <id> --hard --no-policy
