@@ -2,10 +2,12 @@
 Model comparison tool.
 
 Loads two or more eval result JSON files and prints a side-by-side
-comparison table across models.
+comparison table across models. Discovery results (eval/eval_discovery.py)
+get their own table, one row per model × catalog × policy mode.
 
 Usage:
     python -m eval.compare_models eval/results/eval_*.json
+    python -m eval.compare_models eval/results/discovery_*.json
 
     # or compare specific files:
     python -m eval.compare_models \
@@ -45,8 +47,55 @@ def _print_table(rows: list[dict], headers: list[str]) -> None:
         print("  ".join(_fmt(row.get(h, "—")).ljust(w) for h, w in zip(headers, widths)))
 
 
+def is_discovery(result: dict) -> bool:
+    return "mean_precision" in result and "runs" in result
+
+
+def _top(counts: dict[str, int], n: int = 2) -> str:
+    items = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:n]
+    return ", ".join(f"{k}×{v}" for k, v in items) or "—"
+
+
+def compare_discovery(results: list[dict]) -> None:
+    """One row per result file, sorted by model, catalog, then policy mode."""
+    rows = []
+    for r in results:
+        missed: dict[str, int] = {}
+        chosen: dict[str, int] = {}
+        for run in r["runs"]:
+            for name in run.get("missed", []):
+                missed[name] = missed.get(name, 0) + 1
+            for name in run.get("distractors_chosen", []):
+                chosen[name] = chosen.get(name, 0) + 1
+        rows.append({
+            "model":       r.get("model_id", "?").split("/")[-1][:32],
+            "catalog":     r.get("catalog_name") or Path(r.get("catalog", "?")).stem,
+            "policy":      "on" if r.get("policy") else "off",
+            "runs":        len(r["runs"]),
+            "precision":   r.get("mean_precision"),
+            "recall":      r.get("mean_recall"),
+            "safety_miss": r.get("safety_critical_miss_rate"),
+            "distractor":  r.get("distractor_rate"),
+            "unparsed":    r.get("parse_failure_rate"),   # absent in files from before it was recorded
+            "most missed": _top(missed),
+            "distractors chosen": _top(chosen),
+        })
+    rows.sort(key=lambda x: (x["model"], x["catalog"], x["policy"] == "off"))
+    print("\n═══ Discovery Scores ═══")
+    print("(precision/recall: means over runs; safety_miss, distractor, unparsed: share of runs)")
+    _print_table(rows, ["model", "catalog", "policy", "runs", "precision", "recall", "safety_miss",
+                        "distractor", "unparsed", "most missed", "distractors chosen"])
+    print()
+
+
 def compare(paths: list[str | Path], show_per_scenario: bool = False) -> None:
     results = [load_result(p) for p in paths]
+    discovery = [r for r in results if is_discovery(r)]
+    if discovery:
+        compare_discovery(discovery)
+    results = [r for r in results if not is_discovery(r)]
+    if not results:
+        return
 
     print("\n═══ Model Metadata ═══")
     meta_headers = ["model_id", "api_base", "temperature", "eval_run_id", "timestamp"]

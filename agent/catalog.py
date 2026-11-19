@@ -9,10 +9,12 @@ catalog:
                                or drafted from any folder of files
                                (generators/profile_catalog.py); gitignored
   data/catalog_policy.yaml     tracked in git: the fields a person decides
-                               (certified, safety_critical, decision_use)
+                               (certified, safety_critical, decision_use,
+                               role, mapping)
 
-load_catalog() merges the two. Only a certified entry can be safety-critical,
-so a drafted description can never add or remove a safety rule on its own.
+load_catalog() merges the two. Only a certified entry can be safety-critical
+or bound to a role reader (agent/roles.py), so a drafted description can never
+add or remove a safety rule, or change what the harness enforces, on its own.
 """
 from __future__ import annotations
 
@@ -22,6 +24,8 @@ from typing import Any
 
 import pandas as pd
 import yaml
+
+from agent.roles import BindingError, check_binding
 
 DATA_DIR     = Path(__file__).parent.parent / "data" / "synthetic"
 CATALOG_PATH = DATA_DIR / "catalog.yaml"
@@ -38,7 +42,7 @@ TOOL_SOURCES = {
     "energy_pricing.csv":    "energy_pricing",
 }
 
-POLICY_FIELDS = ("certified", "safety_critical", "decision_use")
+POLICY_FIELDS = ("certified", "safety_critical", "decision_use", "role", "mapping")
 
 
 # ── Profiling ─────────────────────────────────────────────────────────────────
@@ -89,7 +93,9 @@ def load_catalog(catalog_path: Path = CATALOG_PATH, policy_path: Path | None = P
     """Catalog entries with the policy fields merged in.
 
     An entry the policy does not cover is uncertified: its safety_critical is
-    forced to False and its drafted decision_use is kept only as a draft.
+    forced to False, its drafted decision_use is kept only as a draft, and it
+    has no binding. A certified entry with a role gets a binding for the role
+    reader: {"role", "source" (its first file, next to the catalog), "mapping"}.
     """
     catalog_path = Path(catalog_path)
     if not catalog_path.exists():
@@ -110,6 +116,15 @@ def load_catalog(catalog_path: Path = CATALOG_PATH, policy_path: Path | None = P
         entry["safety_critical"] = entry["certified"] and bool(rules.get("safety_critical", False))
         if entry["certified"] and rules.get("decision_use"):
             entry["decision_use"] = rules["decision_use"]
+        entry["binding"] = None
+        if entry["certified"] and rules.get("role"):
+            binding = {"role": rules["role"], "mapping": dict(rules.get("mapping") or {}),
+                       "source": str(catalog_path.parent / (entry.get("files") or [""])[0])}
+            check_binding(name, binding)
+            missing = set(binding["mapping"].values()) - set(entry.get("columns") or {})
+            if missing:
+                raise BindingError(f"{name}: mapping names columns not in the data: {sorted(missing)}")
+            entry["binding"] = binding
         merged[name] = entry
     return merged
 
@@ -129,7 +144,7 @@ def _column_line(name: str, col: dict) -> str:
 def catalog_prompt(catalog: dict[str, dict]) -> str:
     """The catalog as the discovery step sees it.
 
-    Leaves out the tool binding and the safety flag, so discovery is judged
+    Leaves out the tool, the role binding and the safety flag, so discovery is judged
     on what the data means, not on labels that give the answer away. The
     decision_use line is shown only once a person has certified it.
     """

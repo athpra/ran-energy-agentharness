@@ -50,6 +50,7 @@ def run(
     validator_model: str | None = None,
     run_dir=None,
     policy: Policy | None = None,
+    bindings: dict[str, dict] | None = None,
 ) -> list[dict]:
     llm           = get_llm(model)
     validator_llm = get_validator_llm(validator_model)
@@ -63,6 +64,7 @@ def run(
         enabled_tools=enabled_tools,
         validator_llm=validator_llm,
         policy=policy,
+        bindings=bindings,
     )
 
     ts = pd.Timestamp.now().normalize()  # start of today; iterations advance virtually
@@ -151,7 +153,8 @@ def main():
         with open(run_dir / "discovery.json", "w") as f:
             json.dump(discovery.to_dict(), f, indent=2)
     results = run(scenario, args.intent, args.iterations, enabled, condition, args.model,
-                  args.validator_model, run_dir=run_dir, policy=policy)
+                  args.validator_model, run_dir=run_dir, policy=policy,
+                  bindings=discovery.bindings if discovery is not None else None)
     save_results(run_dir, results)
 
 

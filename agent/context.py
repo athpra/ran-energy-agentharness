@@ -6,6 +6,11 @@ string block ready to inject into an LLM prompt.
 
 Pass `enabled_tools` as a subset to run ablation experiments — only
 those tools will be called and included in the prompt context.
+
+Pass `bindings` (from discovery) for datasets bound to a role reader
+(agent/roles.py). A cell_blocker dataset's active cells are left out of the
+sleep candidates and listed as required wakes when asleep; the harness then
+enforces both in code.
 """
 from __future__ import annotations
 
@@ -18,6 +23,7 @@ from tools.alarm_fault        import query as alarm_fault_query
 from tools.interference       import query as interference_query
 from tools.energy_pricing     import query as energy_pricing_query
 from agent.policy             import DEFAULT_POLICY, Policy
+from agent.roles              import blocked_cells
 
 ALL_TOOLS = frozenset([
     "historical_kpi",
@@ -37,6 +43,7 @@ def assemble(
     current_throughput_mbps: float | None = None,
     intent_mbps: float | None = None,
     policy: Policy | None = None,
+    bindings: dict[str, dict] | None = None,
 ) -> tuple[dict[str, Any], str]:
     """
     Returns (raw_context_dict, formatted_prompt_block).
@@ -50,7 +57,7 @@ def assemble(
     policy = policy or DEFAULT_POLICY
     ctx: dict[str, Any] = {"tools_used": list(enabled_tools)}
     lines: list[str]    = ["### Tool Context\n"]
-    if not enabled_tools:
+    if not enabled_tools and not bindings:
         lines.append("(no additional tool context — act on current KPIs alone)\n")
 
     if "historical_kpi" in enabled_tools:
@@ -136,10 +143,24 @@ def assemble(
         lines.append(f"  Forecast: {forecast_str}")
         lines.append("")
 
+    # Role-bound datasets (discovery): cells that must stay on air
+    role_blocked: dict[str, list[int]] = {}
+    if bindings:
+        for name, cells in blocked_cells(timestamp, bindings).items():
+            role_blocked[name] = sorted(cells)
+            lines.append(f"**{name} (certified; DO NOT sleep these cells, wake them if asleep):**")
+            if cells:
+                lines += [f"  Cell {cid}: {why}" for cid, why in sorted(cells.items())]
+            else:
+                lines.append("  None active")
+            lines.append("")
+        ctx["role_blocked"] = role_blocked
+    must_be_awake = {cid for cells in role_blocked.values() for cid in cells}
+
     # Pre-computed decision summary — collapses all signal reasoning so the
     # Planner can act without multi-step inference across all tool blocks.
-    if enabled_tools:
-        blocked: set[int] = set()
+    if enabled_tools or bindings:
+        blocked: set[int] = set(must_be_awake)
 
         # Fault-blocked cells
         fault_data = ctx.get("alarm_fault", {})
@@ -202,6 +223,10 @@ def assemble(
             wake_candidates = sorted(sleeping_cell_ids)
         ctx["wake_candidates"] = wake_candidates
 
+        # Required wakes: sleeping cells a certified blocker says must be on air
+        required_wake = sorted(must_be_awake & _sleeping_set)
+        ctx["required_wake"] = required_wake
+
         # Structured per-tool blocking breakdown — serialized to JSONL so the
         # analysis notebook can show which signal drove each decision.
         pricing_data = ctx.get("energy_pricing", {})
@@ -216,6 +241,7 @@ def assemble(
             "surge_step":           surge_step,
             "pricing_tier":         pricing_data.get("current_tier", ""),
             "pricing_price":        pricing_data.get("current_price_per_kwh", None),
+            **({"role_blocked": role_blocked, "required_wake": required_wake} if bindings else {}),
         }
 
         lines.append("### Pre-computed Action Guidance")
@@ -231,6 +257,8 @@ def assemble(
             lines.append(
                 f"WAKE these cells (Sleeping, surge in t+{surge_step}): {wake_candidates}"
             )
+        if required_wake:
+            lines.append(f"WAKE these cells (Sleeping, must be on air): {required_wake}")
         lines.append("")
 
     return ctx, "\n".join(lines)

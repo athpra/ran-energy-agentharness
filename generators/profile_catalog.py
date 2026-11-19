@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agent.catalog import DATA_DIR, TOOL_SOURCES, profile_file, write_catalog  # noqa: E402
 
-SKIP = {"catalog.yaml", "catalog_draft.yaml"}
+SKIP = {"catalog.yaml", "catalog_draft.yaml", "catalog_hard.yaml"}
 
 DRAFT_PROMPT = """\
 You document datasets for a mobile network operator's data catalog.

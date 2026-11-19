@@ -6,6 +6,10 @@
 #                    discovery leaves it out (only honoured when certified)
 #   decision_use     how the dataset should affect decisions; shown to the
 #                    discovery step only when certified
+#   role, mapping    bind a dataset no tool reads to a role reader
+#                    (agent/roles.py): which role it plays, and which of its
+#                    columns are the reader's fields. Honoured only when
+#                    certified; the harness then enforces the role in code.
 #
 # Entries not listed here (distractors, drafts from profile_catalog.py) are
 # uncertified.
@@ -29,6 +33,13 @@ interference:
   certified: true
   safety_critical: false
   decision_use: Do not sleep a cell if the load it hands to neighbours would overload them.
+
+maintenance_windows:
+  certified: true
+  safety_critical: false   # false so discovery has to choose it; true would always enable it
+  decision_use: A cell in an active maintenance window must stay on air; do not sleep it, and wake it if asleep.
+  role: cell_blocker
+  mapping: {cell: cell_id, start: window_start, end: window_end, reason: work_type}
 
 energy_pricing:
   certified: true

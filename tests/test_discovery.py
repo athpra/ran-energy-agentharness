@@ -7,6 +7,7 @@ Run from the project root:
 """
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 import tempfile
@@ -18,7 +19,7 @@ import yaml  # noqa: E402
 
 from agent.catalog import DATA_DIR, POLICY_PATH, catalog_prompt, load_catalog  # noqa: E402
 from agent.discovery import _parse_selection, discover, resolve  # noqa: E402
-from generators import generate_catalog, profile_catalog  # noqa: E402
+from generators import generate_catalog, generate_maintenance, profile_catalog  # noqa: E402
 
 SOURCES = ["historical_kpi.csv", "traffic_forecast.csv", "faults.csv",
            "neighbor_graph.json", "load_shift_matrix.csv", "energy_pricing.csv"]
@@ -37,6 +38,7 @@ class StubLLM:
 def _generated_catalog(tmp: Path) -> Path:
     for f in SOURCES:
         shutil.copy(DATA_DIR / f, tmp / f)
+    generate_maintenance.generate(tmp / "historical_kpi.csv").to_csv(tmp / "maintenance_windows.csv", index=False)
     entries = generate_catalog.generate(tmp, seed=42)
     path = tmp / "catalog.yaml"
     generate_catalog.write_catalog(entries, path, header="test")
@@ -48,8 +50,9 @@ def test_generated_catalog_maps_every_tool_and_adds_distractors():
         catalog = load_catalog(_generated_catalog(Path(d)))
     tools = {e["tool"] for e in catalog.values()} - {None}
     assert tools == {"historical_kpi", "traffic_forecast", "alarm_fault", "interference", "energy_pricing"}
-    assert [n for n, e in catalog.items() if e["tool"] is None] == [
+    assert [n for n, e in catalog.items() if e["tool"] is None and not e["binding"]] == [
         "subscriber_billing", "site_inventory", "legacy_alarm_archive"]
+    assert catalog["maintenance_windows"]["binding"]["role"] == "cell_blocker"
     severity = catalog["faults"]["columns"]["severity"]
     assert severity["type"] == "text" and severity["meaning"] == "fault severity" and severity["values"]
     assert catalog["faults"]["columns"]["cell_id"] == {"meaning": "cell index", "type": "number", "min": 0, "max": 20}
@@ -137,6 +140,69 @@ def test_profile_catalog_uses_llm_draft():
     assert entry["description"] == "Fault events per cell." and entry["drafted_by"] == "stub"
     assert entry["columns"]["severity"]["meaning"] == "how bad the fault is"
     assert entry["columns"]["cell_id"]["meaning"] == ""
+
+
+def test_hard_catalog_adds_unusable_near_misses_next_to_their_twins():
+    from eval.eval_discovery import relevant_datasets
+    with tempfile.TemporaryDirectory() as d:
+        path = _generated_catalog(Path(d))
+        entries = yaml.safe_load(path.read_text())
+        hard = generate_catalog.generate_hard(entries, Path(d), seed=42)
+        generate_catalog.write_catalog(hard, Path(d) / "catalog_hard.yaml", header="test")
+        easy, hard = load_catalog(path), load_catalog(Path(d) / "catalog_hard.yaml")
+    names = list(hard)
+    for name, spec in generate_catalog.HARD_DISTRACTORS.items():
+        assert names.index(name) == names.index(spec["after"]) + 1
+        assert hard[name]["tool"] is None and hard[name]["binding"] is None
+    assert relevant_datasets(hard) == relevant_datasets(easy)
+    assert set(hard["fault_feed_lab"]["columns"]) == set(hard["faults"]["columns"])
+
+
+def test_eval_keeps_raw_responses_and_counts_unparsed_ones_apart_from_empty_choices():
+    from eval.eval_discovery import run_discovery_eval
+    catalog = {"faults": {"tool": "alarm_fault", "safety_critical": True},
+               "energy_pricing": {"tool": "energy_pricing"},
+               "site_inventory": {"tool": None}}
+
+    class Replies(StubLLM):
+        def __init__(self, replies):
+            self.replies = iter(replies)
+
+        def invoke(self, messages):
+            return type("Reply", (), {"content": next(self.replies)})()
+
+    llm = Replies(['<think>long</think>{"selected": [{"dataset": "faults", "reason": "safety"}, '
+                   '{"dataset": "site_inventory", "reason": "cells"}]}',
+                   '<think>ran out of tokens', '{"selected": []}'])
+    out = run_discovery_eval(catalog, {"faults"}, llm, "5 Mbps", 3, verbose=False)
+    assert [r["parse_failed"] for r in out["runs"]] == [False, True, False]
+    assert out["runs"][1]["raw"] == "<think>ran out of tokens"
+    assert out["runs"][0]["precision"] == 0.5 and out["runs"][0]["recall"] == 0.5
+    assert out["parse_failure_rate"] == 0.333 and out["distractor_rate"] == 0.333
+    assert out["safety_critical_miss_rate"] == 0.667
+
+
+def test_compare_models_prints_a_discovery_row_per_model_and_mode():
+    import contextlib
+    import io
+    from eval.compare_models import compare
+    run = {"missed": ["historical_kpi"], "distractors_chosen": ["fault_feed_lab"]}
+    files = []
+    with tempfile.TemporaryDirectory() as d:
+        for model, policy in [("org/model-b", True), ("org/model-a", False), ("org/model-a", True)]:
+            path = Path(d) / f"{model.split('/')[-1]}_{policy}.json"
+            path.write_text(json.dumps({"model_id": model, "catalog_name": "catalog_hard", "policy": policy,
+                                        "runs": [run, run], "mean_precision": 0.8, "mean_recall": 0.9,
+                                        "safety_critical_miss_rate": 0.0, "distractor_rate": 1.0,
+                                        "parse_failure_rate": 0.0}))
+            files.append(path)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            compare(files)
+    rows = [l for l in out.getvalue().splitlines() if l.startswith("model-")]
+    assert [r.split()[:3] for r in rows] == [["model-a", "catalog_hard", "on"], ["model-a", "catalog_hard", "off"],
+                                            ["model-b", "catalog_hard", "on"]]
+    assert "historical_kpi×2" in rows[0] and "fault_feed_lab×2" in rows[0]
 
 
 if __name__ == "__main__":

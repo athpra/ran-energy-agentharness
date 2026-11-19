@@ -4,6 +4,8 @@ Agent Harness.
 Orchestrates one closed-loop iteration:
   1. Assemble tool context
   2. Planner proposes actions
+     (then the certified-blocker rule: no sleep on a cell a role-bound
+      cell_blocker dataset lists, and wake it if asleep; code, not an LLM)
   3. VIAVI AI RSG simulates proposed actions  (Sim 1)
   4. Validator approves / rejects
   5. VIAVI AI RSG applies approved actions    (Sim 2)
@@ -91,6 +93,7 @@ class AgentHarness:
         planner_system_prompt: str | None = None,
         validator_llm: ChatOpenAI | None = None,
         policy: Policy | None = None,
+        bindings: dict[str, dict] | None = None,
     ):
         self.llm                    = llm
         self.validator_llm          = validator_llm or llm
@@ -100,6 +103,7 @@ class AgentHarness:
         self.enabled_tools          = enabled_tools
         self.planner_system_prompt  = planner_system_prompt
         self.policy                 = policy
+        self.bindings               = bindings or {}
         self.history: list[IterationResult] = []
 
     def run_iteration(
@@ -129,6 +133,7 @@ class AgentHarness:
             current_throughput_mbps=current_throughput_mbps,
             intent_mbps=intent_mbps,
             policy=self.policy,
+            bindings=self.bindings,
         )
 
         # Step 2 — planner proposes actions
@@ -185,6 +190,25 @@ class AgentHarness:
                     f"waking {len(proposed)} cells: {wake_source}"
                 )
 
+        # Certified-blocker rule: enforced here, before Sim 1 and the Validator,
+        # so neither LLM can sleep a cell that must be on air
+        rule_rejected: list[dict] = []
+        role_blocked = tool_ctx.get("role_blocked") or {}
+        if role_blocked:
+            source = {cid: name for name, cells in role_blocked.items() for cid in cells}
+            rule_rejected = [
+                {"action": "sleep", "cell_id": a["cell_id"],
+                 "reason": f"certified rule: {source[a['cell_id']]} lists the cell as active"}
+                for a in proposed if a["action"] == "sleep" and a["cell_id"] in source
+            ]
+            proposed = [a for a in proposed
+                        if not (a["action"] == "sleep" and a["cell_id"] in source)]
+            have_wake = {a["cell_id"] for a in proposed if a["action"] == "wake"}
+            proposed += [
+                {"action": "wake", "cell_id": cid, "reason": f"must be on air: {source[cid]}"}
+                for cid in tool_ctx.get("required_wake") or [] if cid not in have_wake
+            ]
+
         # Step 3 — simulate proposed actions (Sim 1)
         if proposed:
             sim1_summary, _ = self.sim_test_fn(proposed)
@@ -210,6 +234,7 @@ class AgentHarness:
         rejected = [r for r in rejected if r.get("action") == "sleep"]
         rejected_ids = {r["cell_id"] for r in rejected}
         approved = [a for a in proposed if a["cell_id"] not in rejected_ids]
+        rejected = rule_rejected + rejected
 
         # Step 5 — apply approved actions (Sim 2)
         if approved:

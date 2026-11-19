@@ -12,7 +12,9 @@ all five additional tools active.
 
 Pass --discover to let the Planner choose its own data from the catalog
 (data/synthetic/catalog.yaml) before the first cycle, and --policy to run with
-tuned thresholds (experiments/tune_policy.py).
+tuned thresholds (experiments/tune_policy.py). Chosen datasets with a certified
+role (e.g. maintenance_windows, a cell_blocker) are read by their role reader
+(agent/roles.py) instead of a tool.
 
 Run:
     python experiments/full_harness_vtzcycle.py --intent "3 Mbps" --iterations 96
@@ -59,6 +61,7 @@ def run(
     llm=None,
     validator_llm=None,
     verbose: bool = True,
+    bindings: dict[str, dict] | None = None,
 ) -> list[dict]:
     # llm / validator_llm let the policy tuner pass stand-ins instead of endpoints
     llm           = llm or get_llm(model)
@@ -73,6 +76,7 @@ def run(
         enabled_tools=enabled_tools,
         validator_llm=validator_llm,
         policy=policy,
+        bindings=bindings,
     )
 
     ts = pd.Timestamp.now().normalize()  # midnight today; iterations advance virtually
@@ -216,7 +220,8 @@ def main():
 
     run(scenario, args.intent, args.iterations, enabled, condition, args.model,
         args.validator_model, run_dir=run_dir,
-        planner_model_id=planner_id, validator_model_id=validator_id, policy=policy)
+        planner_model_id=planner_id, validator_model_id=validator_id, policy=policy,
+        bindings=discovery.bindings if discovery is not None else None)
 
 
 if __name__ == "__main__":

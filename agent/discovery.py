@@ -7,6 +7,10 @@ use. The chosen datasets map onto the harness's enabled_tools, so everything
 after this step (context assembly, safety checks, Planner, Validator) runs
 unchanged.
 
+A chosen dataset with a certified role (agent/roles.py) is bound to its role
+reader instead of a tool: the result's bindings carry it to the harness. This
+is how a new dataset is used without writing a new tool.
+
 Safety rule: a certified safety-critical dataset (data/catalog_policy.yaml)
 is always enabled. If discovery leaves one out, it is added back and the
 miss is recorded in safety_added, so a run never loses a safety check but
@@ -45,6 +49,7 @@ class DiscoveryResult:
     selected:      list[str]
     reasons:       dict[str, str]
     enabled_tools: frozenset[str]
+    bindings:      dict[str, dict] = field(default_factory=dict)  # role-bound datasets (agent/roles.py)
     safety_added:  list[str] = field(default_factory=list)   # safety-critical datasets discovery missed
     unknown:       list[str] = field(default_factory=list)   # names not in the catalog
     raw:           str = ""
@@ -64,6 +69,9 @@ class DiscoveryResult:
         if self.unknown:
             lines.append(f"  ignored names not in the catalog: {self.unknown}")
         lines.append(f"  enabled tools: {sorted(self.enabled_tools)}")
+        if self.bindings:
+            lines.append("  role-bound datasets: " + ", ".join(
+                f"{n} ({b['role']})" for n, b in self.bindings.items()))
         return "\n".join(lines)
 
 
@@ -109,10 +117,13 @@ def resolve(selection: list[dict], catalog: dict[str, dict], enforce_safety: boo
         catalog[name].get("tool")
         for name in selected + safety_added
     }
+    bindings = {name: catalog[name]["binding"] for name in selected + safety_added
+                if catalog[name].get("binding")}
     return DiscoveryResult(
         selected=selected,
         reasons=reasons,
         enabled_tools=frozenset(t for t in tools if t in ALL_TOOLS),
+        bindings=bindings,
         safety_added=safety_added,
         unknown=unknown,
     )

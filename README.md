@@ -86,6 +86,20 @@ Mobile operators need to reduce 5G RAN energy consumption during low-traffic per
    python experiments/full_harness.py --rsg-host $RSG_HOST --discover
    python -m eval.eval_discovery --runs 10    # score discovery alone, no RSG needed
 
+   # Benchmark models' discovery: each model in four modes, then one table.
+   # --no-policy hides the certified decision-use hints; --hard adds near-miss distractors
+   python -m eval.eval_discovery --model <id>
+   python -m eval.eval_discovery --model <id> --no-policy
+   python -m eval.eval_discovery --model <id> --hard
+   python -m eval.eval_discovery --model <id> --hard --no-policy
+   python -m eval.compare_models eval/results/discovery_*.json
+
+   # A new kind of data with no new code: tonight's maintenance schedule is read
+   # by the cell_blocker role reader through its certified catalog entry.
+   # Fixed vs discovery harness on the mock (no RSG; --discover oracle needs no LLM)
+   python experiments/maintenance_scenario.py
+   python experiments/full_harness_vtzcycle.py --rsg-host $RSG_HOST --intent "5 Mbps" --discover --policy policies/tuned_calibrated.yaml
+
    # Policy tuning — calibrate the mock RSG from VIAVI runs, search the harness
    # thresholds on it, then confirm on VIAVI
    python -m mock_rsg.calibrate output/run_*     # writes mock_rsg/viavi_calibration.json; leaves out runs from older VIAVI setups
@@ -151,8 +165,8 @@ The system is a fixed-pipeline tool-augmented agent harness. On each decision cy
 | `tools/` | Runtime tool API modules (historical KPI, forecast, faults, interference, pricing) |
 | `policies/` | Harness threshold files: `default.yaml` (built-in values) and tuned policies |
 | `mock_rsg/` | Mock VIAVI RSG for tuning and tests; `viavi_calibration.json` fits it to logged VIAVI runs (`python -m mock_rsg.calibrate`) |
-| `data/catalog_policy.yaml` | Reviewed catalog fields (certified, safety-critical, decision use), merged into the generated catalog |
-| `agent/` | Agent harness: context assembler, planner, validator, orchestration |
+| `data/catalog_policy.yaml` | Reviewed catalog fields (certified, safety-critical, decision use, role and column mapping), merged into the generated catalog |
+| `agent/` | Agent harness: context assembler, planner, validator, orchestration; data catalog, discovery and role readers (`roles.py`) |
 | `experiments/` | Experiment runners — one script per experimental condition |
 | `analysis/` | Results analysis notebook producing publication-ready figures |
 | `data/synthetic/` | Generated datasets (gitignored — regenerate with `generators/generate_all.py`) |

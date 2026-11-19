@@ -1,8 +1,8 @@
 """
 Run all synthetic data generators in dependency order.
 
-Historical KPI must be generated before traffic forecast and faults,
-since those read from it. Interference and pricing are independent.
+Historical KPI must be generated before traffic forecast, faults and the
+maintenance schedule, since those read from it. Interference and pricing are independent.
 The data catalog runs last, since it profiles the other files.
 
 Usage:
@@ -43,6 +43,7 @@ def main():
                                          "--seed", str(args.seed)])
     run("generate_interference.py",     cell)
     run("generate_energy_pricing.py",   common)
+    run("generate_maintenance.py",      ["--seed", str(args.seed)])
     # Last: profiles the files above; its own RNG, so they are unchanged
     run("generate_catalog.py",          ["--seed", str(args.seed)])
 
