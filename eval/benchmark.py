@@ -40,7 +40,10 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# CML's PBJ Workbench runs a job script cell by cell, without __file__; it
+# starts in the project root, which is then the import root
+_ROOT = Path(__file__).resolve().parent.parent if "__file__" in globals() else Path.cwd()
+sys.path.insert(0, str(_ROOT))
 
 import yaml  # noqa: E402
 from dotenv import find_dotenv, load_dotenv  # noqa: E402
@@ -94,7 +97,9 @@ def main():
                         help="LLM-drafted catalog for the hardest discovery mode (skipped if missing)")
     parser.add_argument("--output", type=Path, default=None,
                         help="Results folder (default: eval/results/benchmark_<timestamp>)")
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()   # the Workbench kernel can add its own arguments
+    if unknown:
+        print(f"Ignoring arguments: {unknown}")
 
     if not args.models.exists():
         sys.exit(f"No models file at {args.models}. Copy eval/models.example.yaml to it and list your models.")
