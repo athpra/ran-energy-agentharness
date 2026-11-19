@@ -205,6 +205,21 @@ def test_compare_models_prints_a_discovery_row_per_model_and_mode():
     assert "historical_kpi×2" in rows[0] and "fault_feed_lab×2" in rows[0]
 
 
+def test_recall_counts_a_capability_once_however_many_files_provide_it():
+    from eval.eval_discovery import score
+    catalog = {"neighbor_graph":    {"tool": "interference"},
+               "load_shift_matrix": {"tool": "interference"},
+               "faults":            {"tool": "alarm_fault"},
+               "maintenance":       {"tool": None, "binding": {"role": "cell_blocker"}},
+               "capacity_plan":     {"tool": None, "binding": None}}
+    one_file = score(["neighbor_graph", "faults", "maintenance"], catalog, {"faults"})
+    assert one_file["recall"] == 1.0 and one_file["missed"] == [] and one_file["precision"] == 1.0
+    none = score(["faults", "capacity_plan"], catalog, {"faults"})
+    assert none["recall"] == 0.333 and none["precision"] == 0.5
+    assert none["missed"] == ["load_shift_matrix", "maintenance", "neighbor_graph"]
+    assert none["distractors_chosen"] == ["capacity_plan"]
+
+
 if __name__ == "__main__":
     tests = [v for k, v in dict(globals()).items() if k.startswith("test_")]
     for t in tests:

@@ -3,7 +3,9 @@ Discovery eval.
 
 Runs the discovery step several times against the data catalog and scores the
 choices: a dataset is relevant when a harness tool or a certified role reader
-(agent/roles.py) reads it, and a distractor when neither does. Needs only the
+(agent/roles.py) reads it, and a distractor when neither does. Recall counts
+capabilities (tools and role readers) covered, so two files that feed one tool
+count once. Needs only the
 LLM endpoint, not the VIAVI RSG.
 
 To benchmark models, run each one in all four modes and compare the files:
@@ -40,29 +42,37 @@ from agent.discovery import _parse_selection, discover
 HARD_CATALOG_PATH = DATA_DIR / "catalog_hard.yaml"
 
 
-def relevant_datasets(catalog: dict[str, dict]) -> set[str]:
-    return {n for n, e in catalog.items() if e.get("tool") or e.get("binding")}
+def relevant_datasets(catalog: dict[str, dict]) -> dict[str, str]:
+    """{dataset: the capability it provides}: its tool, or its role reader.
+    Several datasets can provide one capability (neighbor_graph and
+    load_shift_matrix both feed the interference tool in a drafted catalog)."""
+    return {n: e["tool"] if e.get("tool") else f"{e['binding']['role']}:{n}"
+            for n, e in catalog.items() if e.get("tool") or e.get("binding")}
 
 
 def score(selected: list[str], catalog: dict[str, dict], critical: set[str],
-          relevant: set[str] | None = None) -> dict:
-    """critical and relevant come from the policy even when discovery ran
-    without it, so a missed fault feed or maintenance schedule is counted in
-    every mode."""
-    relevant = relevant_datasets(catalog) if relevant is None else relevant & set(catalog)
+          relevant: dict[str, str] | None = None) -> dict:
+    """Recall counts capabilities, not files: a capability is covered when any
+    dataset providing it is chosen, so choosing one of two interference files
+    loses nothing. Precision counts chosen datasets. critical and relevant
+    come from the policy even when discovery ran without it, so a missed fault
+    feed or maintenance schedule is counted in every mode."""
+    relevant = relevant_datasets(catalog) if relevant is None else relevant
+    relevant = {n: c for n, c in relevant.items() if n in catalog}
+    capabilities = set(relevant.values())
     chosen   = set(selected)
-    hits     = chosen & relevant
+    covered  = {relevant[n] for n in chosen if n in relevant}
     return {
-        "precision":             round(len(hits) / len(chosen), 3) if chosen else 0.0,
-        "recall":                round(len(hits) / len(relevant), 3) if relevant else 0.0,
-        "missed":                sorted(relevant - chosen),
-        "distractors_chosen":    sorted(chosen - relevant),
+        "precision":             round(len(chosen & set(relevant)) / len(chosen), 3) if chosen else 0.0,
+        "recall":                round(len(covered) / len(capabilities), 3) if capabilities else 0.0,
+        "missed":                sorted(n for n, c in relevant.items() if c not in covered),
+        "distractors_chosen":    sorted(chosen - set(relevant)),
         "missed_safety_critical": sorted((critical & set(catalog)) - chosen),
     }
 
 
 def run_discovery_eval(catalog: dict[str, dict], critical: set[str], llm, intent: str, runs: int,
-                       verbose: bool = True, relevant: set[str] | None = None) -> dict:
+                       verbose: bool = True, relevant: dict[str, str] | None = None) -> dict:
     results = []
     for i in range(runs):
         res = discover(llm, intent, catalog)

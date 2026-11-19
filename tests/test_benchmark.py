@@ -21,10 +21,11 @@ from eval.eval_discovery import HARD_CATALOG_PATH  # noqa: E402
 def test_models_file_takes_ids_with_or_without_an_endpoint():
     with tempfile.TemporaryDirectory() as d:
         path = Path(d) / "models.yaml"
-        path.write_text("models:\n  - id: org/a\n  - id: org/b\n    api_base: https://b/v1\n  - org/c\n")
-        assert load_models(path) == [{"id": "org/a", "api_base": None},
-                                     {"id": "org/b", "api_base": "https://b/v1"},
-                                     {"id": "org/c", "api_base": None}]
+        path.write_text("models:\n  - id: org/a\n  - id: org/b\n    api_base: https://b/v1\n"
+                        "    timeout: 600\n  - org/c\n")
+        assert load_models(path) == [{"id": "org/a", "api_base": None, "timeout": None},
+                                     {"id": "org/b", "api_base": "https://b/v1", "timeout": 600.0},
+                                     {"id": "org/c", "api_base": None, "timeout": None}]
         for bad in ("models: []\n", "models:\n  - api_base: https://x/v1\n"):
             path.write_text(bad)
             try:

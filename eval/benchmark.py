@@ -51,14 +51,15 @@ SUITES = ("planner", "validator", "discovery")
 
 
 def load_models(path: Path) -> list[dict]:
-    """[{"id": ..., "api_base": ... or None}] from the models file."""
+    """[{"id", "api_base" (or None), "timeout" (or None)}] from the models file."""
     data = yaml.safe_load(Path(path).read_text()) or {}
     models = []
     for m in data.get("models") or []:
         m = {"id": m} if isinstance(m, str) else dict(m)
         if not m.get("id"):
             raise ValueError(f"{path}: every model needs an id")
-        models.append({"id": str(m["id"]), "api_base": m.get("api_base") or None})
+        models.append({"id": str(m["id"]), "api_base": m.get("api_base") or None,
+                       "timeout": float(m["timeout"]) if m.get("timeout") else None})
     if not models:
         raise ValueError(f"{path}: no models listed")
     return models
@@ -80,6 +81,9 @@ def main():
     parser.add_argument("--suites", nargs="+", choices=SUITES, default=list(SUITES))
     parser.add_argument("--runs",   type=int, default=10, help="Discovery runs per mode")
     parser.add_argument("--intent", default="5 Mbps")
+    parser.add_argument("--timeout", type=float, default=300,
+                        help="Seconds per request, unless a model sets its own timeout (default 300; "
+                             "the harness itself uses 120)")
     parser.add_argument("--drafted", type=Path, default=DRAFT_CATALOG_PATH,
                         help="LLM-drafted catalog for the hardest discovery mode (skipped if missing)")
     parser.add_argument("--output", type=Path, default=None,
@@ -100,6 +104,8 @@ def main():
     now = datetime.now(timezone.utc)
     out = args.output or Path("eval/results") / f"benchmark_{now.strftime('%Y%m%d_%H%M%S')}"
     out.mkdir(parents=True, exist_ok=True)
+    for m in models:
+        m["timeout"] = m["timeout"] or args.timeout
     manifest = {"started": now.isoformat(), "models": models, "suites": args.suites,
                 "discovery_runs": args.runs, "intent": args.intent,
                 "drafted_catalog": str(drafted) if drafted else None, "failures": []}
@@ -108,8 +114,9 @@ def main():
     from eval.run_evals import run_evals
 
     for i, m in enumerate(models, 1):
-        print(f"\n{'═' * 70}\n[{i}/{len(models)}] {m['id']}  ({m['api_base'] or 'CDSW_API_URL'})\n{'═' * 70}")
-        llm = get_llm(m["id"], m["api_base"])
+        print(f"\n{'═' * 70}\n[{i}/{len(models)}] {m['id']}  ({m['api_base'] or 'CDSW_API_URL'}, "
+              f"timeout {m['timeout']:g} s)\n{'═' * 70}")
+        llm = get_llm(m["id"], m["api_base"], m["timeout"])
         steps = []
         if "planner" in args.suites or "validator" in args.suites:
             steps.append(("planner/validator", lambda: run_evals(

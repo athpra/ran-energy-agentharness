@@ -42,7 +42,9 @@ def apply_job_arguments() -> None:
 
 # ── LLM factory ──────────────────────────────────────────────────────────────
 
-def get_llm(model: str | None = None, api_base: str | None = None) -> ChatOpenAI:
+def get_llm(model: str | None = None, api_base: str | None = None,
+            timeout: float | None = None) -> ChatOpenAI:
+    """timeout: seconds per request (default 120); reasoning models can need more."""
     load_dotenv(find_dotenv(), override=True)
     auth_mode = os.getenv("AUTH_MODE", "jwt").strip().lower()
 
@@ -68,7 +70,7 @@ def get_llm(model: str | None = None, api_base: str | None = None) -> ChatOpenAI
         openai_api_base=(api_base or os.getenv("CDSW_API_URL", "")).strip(),
         temperature=0.1,
         max_tokens=4096,
-        request_timeout=120,
+        request_timeout=timeout or 120,
     )
 
 
