@@ -21,8 +21,11 @@ every model is scored on the same text:
 
 Run:
     cp eval/models.example.yaml eval/models.yaml     # list your models
-    python -m eval.benchmark --models eval/models.yaml
-    python -m eval.benchmark --models eval/models.yaml --suites discovery --runs 5
+    python -m eval.benchmark                         # --models defaults to eval/models.yaml
+    python -m eval.benchmark --suites discovery --runs 5
+
+As a CML Job: Script eval/benchmark.py; options, if any, go in the job's
+Arguments field (e.g. --suites discovery --runs 5).
 
 Output: eval/results/benchmark_<timestamp>/ (result files, summary.txt, benchmark.json)
 """
@@ -76,8 +79,11 @@ def discovery_modes(drafted: Path | None) -> list[tuple[Path, bool]]:
 
 def main():
     load_dotenv(find_dotenv(), override=True)
+    from experiments.common import apply_job_arguments
+    apply_job_arguments()   # a CML Job's Arguments field
     parser = argparse.ArgumentParser(description="Run every eval on several models")
-    parser.add_argument("--models", type=Path, required=True, help="YAML file listing the models")
+    parser.add_argument("--models", type=Path, default=Path("eval/models.yaml"),
+                        help="YAML file listing the models (default: eval/models.yaml)")
     parser.add_argument("--suites", nargs="+", choices=SUITES, default=list(SUITES))
     parser.add_argument("--runs",   type=int, default=10, help="Discovery runs per mode")
     parser.add_argument("--intent", default="5 Mbps")
@@ -90,6 +96,8 @@ def main():
                         help="Results folder (default: eval/results/benchmark_<timestamp>)")
     args = parser.parse_args()
 
+    if not args.models.exists():
+        sys.exit(f"No models file at {args.models}. Copy eval/models.example.yaml to it and list your models.")
     models = load_models(args.models)
     if "discovery" in args.suites:
         missing = [p for p in (CATALOG_PATH, HARD_CATALOG_PATH) if not p.exists()]
