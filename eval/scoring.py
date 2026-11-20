@@ -10,6 +10,8 @@ import json
 import re
 from typing import Any
 
+from agent.llm_json import find_json, is_action_list, is_decision
+
 
 # ── Planner scoring ───────────────────────────────────────────────────────────
 
@@ -65,16 +67,9 @@ def score_planner(
 
 
 def _is_format_valid(raw: str) -> bool:
-    """True if the raw response contains a parseable JSON array."""
-    raw = raw.strip()
-    match = re.search(r"\[.*\]", raw, re.DOTALL)
-    if not match:
-        return False
-    try:
-        result = json.loads(match.group())
-        return isinstance(result, list)
-    except json.JSONDecodeError:
-        return False
+    """True if the response holds a JSON array of action objects, read the way
+    the harness reads it (agent/llm_json.py: after any reasoning)."""
+    return find_json(raw, is_action_list) is not None
 
 
 # ── Validator scoring ─────────────────────────────────────────────────────────
@@ -121,16 +116,9 @@ def score_validator(
 
 
 def _is_validator_format_valid(raw: str) -> bool:
-    """True if the raw response contains a parseable JSON object with approved/rejected keys."""
-    raw = raw.strip()
-    match = re.search(r"\{.*\}", raw, re.DOTALL)
-    if not match:
-        return False
-    try:
-        d = json.loads(match.group())
-        return isinstance(d, dict) and "approved" in d and "rejected" in d
-    except json.JSONDecodeError:
-        return False
+    """True if the response holds a JSON object with approved and rejected,
+    read the way the harness reads it (agent/llm_json.py)."""
+    return find_json(raw, is_decision) is not None
 
 
 # ── Aggregate helpers ─────────────────────────────────────────────────────────

@@ -38,6 +38,12 @@ SimFn = Callable[[list[dict]], tuple[str, dict]]
 # signature: sim_fn(actions) -> (human_readable_summary, raw_kpi_dict)
 
 
+def _reply_note(reply: str) -> str:
+    """The Planner's own reply, appended to a fallback note so the log shows
+    whether it answered [] or gave an answer that could not be read."""
+    return f"\n--- Planner reply ---\n{reply}" if reply else ""
+
+
 # ── Per-iteration result ──────────────────────────────────────────────────────
 
 @dataclass
@@ -72,6 +78,8 @@ class IterationResult:
             "proposed_actions":     self.proposed_actions,
             "approved_actions":     self.approved_actions,
             "rejected_actions":     self.rejected_actions,
+            "planner_raw":          self.planner_raw,      # the replies, so parsing can be audited
+            "validator_raw":        self.validator_raw,    # (eval/audit_parsing.py)
             "planner_elapsed_s":    round(self.planner_elapsed_s,  2),
             "validator_elapsed_s":  round(self.validator_elapsed_s, 2),
             "total_elapsed_s":      round(self.total_elapsed_s,    2),
@@ -145,6 +153,7 @@ class AgentHarness:
             sleep_candidates=tool_ctx.get("sleep_candidates"),
             system_prompt=self.planner_system_prompt,
         )
+        llm_reply = planner_raw   # kept in the log even when a fallback replaces the actions
 
         # Strip invalid LLM actions: sleep on already-sleeping cells and wake on
         # already-awake cells are no-ops that inflate n_proposed and confuse the
@@ -168,7 +177,8 @@ class AgentHarness:
                 {"action": "sleep", "cell_id": cid, "reason": source}
                 for cid in candidates
             ]
-            planner_raw = f"[fallback] LLM returned []; using {len(proposed)} candidates: {candidates}"
+            planner_raw = (f"[fallback] LLM returned []; using {len(proposed)} candidates: {candidates}"
+                           f"{_reply_note(llm_reply)}")
 
         # Wake fallback: tool-derived surge warning takes priority over reactive
         # QoS-based wake, since it acts before throughput has already dropped.
@@ -187,7 +197,7 @@ class AgentHarness:
                 ]
                 planner_raw = (
                     f"[{'surge' if tool_wake else 'qos'}-wake-fallback] LLM returned []; "
-                    f"waking {len(proposed)} cells: {wake_source}"
+                    f"waking {len(proposed)} cells: {wake_source}{_reply_note(llm_reply)}"
                 )
 
         # Certified-blocker rule: enforced here, before Sim 1 and the Validator,

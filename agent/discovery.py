@@ -27,6 +27,7 @@ from dataclasses import asdict, dataclass, field
 from langchain_openai import ChatOpenAI
 
 from agent.catalog import CATALOG_PATH, catalog_prompt
+from agent.llm_json import find_json
 from agent.context import ALL_TOOLS
 
 SYSTEM_PROMPT = """\
@@ -75,16 +76,18 @@ class DiscoveryResult:
         return "\n".join(lines)
 
 
+def _is_selection(value) -> bool:
+    if isinstance(value, dict):
+        return isinstance(value.get("selected"), list)
+    return isinstance(value, list) and all(
+        isinstance(v, str) or (isinstance(v, dict) and "dataset" in v) for v in value)
+
+
 def _parse_selection(text: str) -> list[dict]:
     """Extract the selection from the LLM response, tolerating reasoning text
     before it and a bare list instead of the wrapping object."""
-    text = (text or "").rsplit("</think>", 1)[-1].strip()
-    match = re.search(r"\{.*\}|\[.*\]", text, re.DOTALL)
-    if not match:
-        return []
-    try:
-        data = json.loads(match.group())
-    except json.JSONDecodeError:
+    data = find_json(text, _is_selection)
+    if data is None:
         return []
     items = data.get("selected", []) if isinstance(data, dict) else data
     out = []

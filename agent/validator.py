@@ -12,6 +12,8 @@ import time
 
 from langchain_openai import ChatOpenAI
 
+from agent.llm_json import find_json, is_decision
+
 SYSTEM_PROMPT = """\
 You are a 5G RAN safety validator.
 Your role is to approve or reject energy-saving actions proposed by the Planner,
@@ -56,18 +58,13 @@ If avg_throughput >= threshold: put ALL proposed actions in "approved", leave "r
 
 
 def _parse_decision(text: str) -> dict:
-    text  = text.strip()
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not match:
-        return {"approved": [], "rejected": []}
-    try:
-        d = json.loads(match.group())
-        return {
-            "approved": d.get("approved", []),
-            "rejected": d.get("rejected", []),
-        }
-    except json.JSONDecodeError:
-        return {"approved": [], "rejected": []}
+    """The decision in the LLM response: the last JSON object with approved
+    and rejected, after any reasoning (agent/llm_json.py)."""
+    d = find_json(text, is_decision) or {}
+    return {
+        "approved": d.get("approved", []) if isinstance(d.get("approved"), list) else [],
+        "rejected": d.get("rejected", []) if isinstance(d.get("rejected"), list) else [],
+    }
 
 
 def validate(

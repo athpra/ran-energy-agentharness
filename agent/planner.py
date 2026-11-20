@@ -12,6 +12,8 @@ import time
 
 from langchain_openai import ChatOpenAI
 
+from agent.llm_json import find_json, is_action_list
+
 SYSTEM_PROMPT = """\
 You are a 5G RAN energy optimization controller.
 Your job is to output sleep/wake actions for N1 cells to save energy while meeting the QoS threshold.
@@ -82,16 +84,10 @@ Now produce the JSON array for the cells below. Output ONLY [...] — nothing be
 
 
 def _parse_actions(text: str) -> list[dict]:
-    """Extract a JSON array from the LLM response, tolerating minor formatting."""
-    text = text.strip()
-    match = re.search(r"\[.*\]", text, re.DOTALL)
-    if not match:
-        return []
-    try:
-        actions = json.loads(match.group())
-        return [a for a in actions if isinstance(a, dict) and "action" in a and "cell_id" in a]
-    except json.JSONDecodeError:
-        return []
+    """The action list in the LLM response: the last JSON array of objects,
+    after any reasoning (agent/llm_json.py)."""
+    actions = find_json(text, is_action_list) or []
+    return [a for a in actions if "action" in a and "cell_id" in a]
 
 
 def plan(

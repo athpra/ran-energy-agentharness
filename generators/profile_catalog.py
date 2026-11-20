@@ -28,6 +28,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agent.catalog import DATA_DIR, TOOL_SOURCES, profile_file, write_catalog  # noqa: E402
+from agent.llm_json import find_json  # noqa: E402
 
 SKIP = {"catalog.yaml", "catalog_draft.yaml", "catalog_hard.yaml"}
 
@@ -49,15 +50,7 @@ def _samples(path: Path, n: int = 3) -> str:
 
 
 def _parse_draft(text: str) -> dict:
-    text = (text or "").rsplit("</think>", 1)[-1]
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not match:
-        return {}
-    try:
-        data = json.loads(match.group())
-    except json.JSONDecodeError:
-        return {}
-    return data if isinstance(data, dict) else {}
+    return find_json(text, lambda v: isinstance(v, dict) and ("description" in v or "columns" in v)) or {}
 
 
 def draft_entry(path: Path, llm=None) -> dict:
