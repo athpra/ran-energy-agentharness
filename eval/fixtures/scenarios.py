@@ -7,13 +7,18 @@ Each EvalScenario has:
   - ground_truth_wake:  cell IDs an ideal planner SHOULD propose to wake
   - kpi_summary: the text string fed to the Planner LLM (same format as production)
   - validator_proposals / sim_result_summary: populated on validator scenarios
+  - tool_context / sleep_candidates: optional; what the harness would show the
+    Planner. Without them the Planner sees no tool context, and the expected
+    answers follow the blueprint rules (agent/planner.py, CASE B). With a
+    "Pre-computed Action Guidance" section, expected_sleep / expected_wake give
+    the answer the guidance makes binding (CASE A).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Optional
 
-# Blueprint thresholds (mirrors agent/planner.py and common.py)
+# Blueprint thresholds (mirrors agent/planner.py CASE B and common.py)
 SLEEP_PRB_THRESHOLD = 12.0   # N1_PRB < threshold → sleep candidate
 WAKE_N12_THRESHOLD  = 60.0   # N12_PRB > threshold → wake candidate
 
@@ -54,13 +59,24 @@ class EvalScenario:
     risky_proposal_ids:   Optional[list[int]]  = None
     # Cell IDs in validator_proposals that are "safe" (should be approved)
     safe_proposal_ids:    Optional[list[int]]  = None
+    # What the harness shows: tool context (None → no tool context) and the
+    # sleep candidates it passes to plan() as the final instruction
+    tool_context:         Optional[str]        = None
+    sleep_candidates:     Optional[list[int]]  = None
+    # Expected answers when the guidance, not the blueprint rules, decides
+    expected_sleep:       Optional[list[int]]  = None
+    expected_wake:        Optional[list[int]]  = None
 
     @property
     def ground_truth_sleep(self) -> list[int]:
+        if self.expected_sleep is not None:
+            return list(self.expected_sleep)
         return [c.cell_id for c in self.cells if c.should_sleep]
 
     @property
     def ground_truth_wake(self) -> list[int]:
+        if self.expected_wake is not None:
+            return list(self.expected_wake)
         return [c.cell_id for c in self.cells if c.should_wake]
 
     @property
@@ -335,5 +351,115 @@ SCENARIOS.append(EvalScenario(
     ),
     risky_proposal_ids=[0],
     safe_proposal_ids=[1],
+    tool_context=_v03_tool_ctx,
+    tags=["validator", "fault_rejection", "tool_context"],
+))
+
+
+# ── Guidance scenarios: the tool context the full harness shows ──────────────
+# The text follows agent/context.py. The guidance is binding (agent/planner.py
+# CASE A), so the expected answers come from it, not from the blueprint rules.
+
+def _guidance(blocked: list[int], sleep: list[int], extra: str = "", faults: str = "") -> str:
+    lines = ["### Tool Context\n"]
+    if faults:
+        lines += ["**Active faults (DO NOT sleep these cells):**", faults, ""]
+    lines += ["### Pre-computed Action Guidance",
+              f"Blocked cells (faults/forecast/interference): {blocked}"]
+    if extra.startswith("⚠"):
+        lines.append(extra)
+    lines.append(f"SLEEP these cells (Awake, N1_PRB < 12%, all tool signals clear): {sleep}")
+    if extra and not extra.startswith("⚠"):
+        lines.append(extra)
+    return "\n".join(lines) + "\n"
+
+
+# ── G01: Guidance narrows the low-PRB cells ───────────────────────────────────
+SCENARIOS.append(EvalScenario(
+    id="G01_guidance_subset",
+    description="Cells 0-3 have low N1_PRB, but the guidance clears only 0 and 1 (3 faulted, 2 interference).",
+    cells=[
+        CellState(0, "S1/C1", n1_prb=2.0,  n12_prb=10.0, avg_qos=1.0, n1_sleeping=False),
+        CellState(1, "S1/C2", n1_prb=4.0,  n12_prb=12.0, avg_qos=1.4, n1_sleeping=False),
+        CellState(2, "S2/C1", n1_prb=3.0,  n12_prb=15.0, avg_qos=1.1, n1_sleeping=False),
+        CellState(3, "S2/C2", n1_prb=1.0,  n12_prb=9.0,  avg_qos=0.6, n1_sleeping=False),
+        CellState(4, "S3/C1", n1_prb=40.0, n12_prb=20.0, avg_qos=7.2, n1_sleeping=False),
+    ],
+    tool_context=_guidance([2, 3], [0, 1], faults="  Cell 3: hardware_degradation (severity=high)"),
+    sleep_candidates=[0, 1],
+    expected_sleep=[0, 1], expected_wake=[],
+    tags=["planner", "guidance", "subset"],
+))
+
+# ── G02: Throughput guard suppresses every sleep ──────────────────────────────
+SCENARIOS.append(EvalScenario(
+    id="G02_guidance_throughput_guard",
+    description="Low-PRB cells, but throughput is near intent and the guard suppresses all sleeps.",
+    cells=[
+        CellState(0, "S1/C1", n1_prb=3.0, n12_prb=30.0, avg_qos=4.9, n1_sleeping=False),
+        CellState(1, "S1/C2", n1_prb=6.0, n12_prb=35.0, avg_qos=5.0, n1_sleeping=False),
+        CellState(2, "S2/C1", n1_prb=9.0, n12_prb=28.0, avg_qos=5.2, n1_sleeping=False),
+    ],
+    tool_context=_guidance([], [], extra="⚠ THROUGHPUT GUARD: current tp=5.03 Mbps < intent×1.1 (5.50 Mbps) — "
+                                        "all sleep candidates suppressed; focus on waking cells or holding state."),
+    expected_sleep=[], expected_wake=[],
+    tags=["planner", "guidance", "throughput_guard", "empty_output"],
+))
+
+# ── G03: Surge ahead — wake sleeping cells before the load arrives ────────────
+SCENARIOS.append(EvalScenario(
+    id="G03_guidance_surge_wake",
+    description="Sleeping cells with quiet neighbours today, but a surge is two steps away: wake them now.",
+    cells=[
+        CellState(0, "S1/C1", n1_prb=5.0, n12_prb=20.0, avg_qos=6.0, n1_sleeping=False),
+        CellState(1, "S1/C2", n1_prb=0.0, n12_prb=40.0, avg_qos=0.0, n1_sleeping=True),
+        CellState(2, "S2/C1", n1_prb=0.0, n12_prb=30.0, avg_qos=0.0, n1_sleeping=True),
+    ],
+    tool_context=_guidance([0, 1, 2], [], extra="WAKE these cells (Sleeping, surge in t+2): [1, 2]"),
+    expected_sleep=[], expected_wake=[1, 2],
+    tags=["planner", "guidance", "surge", "wake"],
+))
+
+# ── G04: A cell that must be on air, and a normal sleep ───────────────────────
+SCENARIOS.append(EvalScenario(
+    id="G04_guidance_must_be_on_air",
+    description="Cell 2 is asleep inside a maintenance window: wake it. Cell 0 is cleared to sleep.",
+    cells=[
+        CellState(0, "S1/C1", n1_prb=2.0,  n12_prb=10.0, avg_qos=0.9, n1_sleeping=False),
+        CellState(1, "S1/C2", n1_prb=30.0, n12_prb=15.0, avg_qos=6.8, n1_sleeping=False),
+        CellState(2, "S2/C1", n1_prb=0.0,  n12_prb=18.0, avg_qos=0.0, n1_sleeping=True),
+    ],
+    tool_context=("### Tool Context\n\n"
+                  "**maintenance_windows (certified; DO NOT sleep these cells, wake them if asleep):**\n"
+                  "  Cell 2: drive_test\n\n"
+                  + _guidance([2], [0], extra="WAKE these cells (Sleeping, must be on air): [2]")
+                  .replace("### Tool Context\n\n", "")),
+    sleep_candidates=[0],
+    expected_sleep=[0], expected_wake=[2],
+    tags=["planner", "guidance", "maintenance", "sleep_and_wake"],
+))
+
+# ── V04: Validator — fault in the harness's own format, sim passes ───────────
+SCENARIOS.append(EvalScenario(
+    id="V04_validator_fault_harness_format",
+    description="Validator: sim passes (7.9 Mbps), but the harness's fault block lists cell 0. Reject 0, approve 1.",
+    cells=[
+        CellState(0, "S1/C1", n1_prb=2.0, n12_prb=0.0, avg_qos=7.9, n1_sleeping=False),
+        CellState(1, "S1/C2", n1_prb=4.0, n12_prb=0.0, avg_qos=7.6, n1_sleeping=False),
+    ],
+    validator_proposals=[
+        {"action": "sleep", "cell_id": 0, "reason": "low N1_PRB"},
+        {"action": "sleep", "cell_id": 1, "reason": "low N1_PRB"},
+    ],
+    sim_result_summary=_sim_summary(
+        [CellState(0, "S1/C1", 0.0, 12.0, 0.0, True),
+         CellState(1, "S1/C2", 0.0, 9.0,  0.0, True)],
+        avg_throughput_mbps=7.9,
+    ),
+    risky_proposal_ids=[0],
+    safe_proposal_ids=[1],
+    tool_context=("### Tool Context\n\n**Active faults (DO NOT sleep these cells):**\n"
+                  "  Cell 0: power_anomaly (severity=high)\n"
+                  "  Sleep candidates (no active fault): [1]\n"),
     tags=["validator", "fault_rejection", "tool_context"],
 ))

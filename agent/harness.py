@@ -4,8 +4,10 @@ Agent Harness.
 Orchestrates one closed-loop iteration:
   1. Assemble tool context
   2. Planner proposes actions
-     (then the certified-blocker rule: no sleep on a cell a role-bound
-      cell_blocker dataset lists, and wake it if asleep; code, not an LLM)
+     (then two rules in code, not an LLM: the guidance rule, sleep only the
+      harness's sleep candidates and add the wakes it asks for; and the
+      certified-blocker rule, no sleep on a cell a role-bound cell_blocker
+      dataset lists, and wake it if asleep)
   3. VIAVI AI RSG simulates proposed actions  (Sim 1)
   4. Validator approves / rejects
   5. VIAVI AI RSG applies approved actions    (Sim 2)
@@ -166,6 +168,21 @@ class AgentHarness:
                 or (a["action"] == "wake"  and a["cell_id"]     in sleeping_set)
             ]
 
+        # Guidance rule: when the tool context has the pre-computed guidance, the
+        # Planner may sleep only the harness's sleep candidates (they already
+        # account for faults, surges, interference, pricing, maintenance and the
+        # throughput guard). Enforced in code, like the certified-blocker rule.
+        rule_rejected: list[dict] = []
+        if proposed and "sleep_candidates" in tool_ctx:
+            allowed = set(tool_ctx.get("sleep_candidates") or [])
+            rule_rejected = [
+                {"action": "sleep", "cell_id": a["cell_id"],
+                 "reason": "guidance rule: not in the harness's sleep candidates"}
+                for a in proposed if a["action"] == "sleep" and a["cell_id"] not in allowed
+            ]
+            proposed = [a for a in proposed if not (a["action"] == "sleep" and a["cell_id"] not in allowed)]
+        planner_answered = bool(proposed)   # the Planner's own actions survived the rule
+
         # Fallback: if the LLM proposes nothing but candidates are available
         # (from tool pre-analysis for full_harness, or from static PRB rules for
         # baseline_digital_twin), use those directly.
@@ -200,13 +217,25 @@ class AgentHarness:
                     f"waking {len(proposed)} cells: {wake_source}{_reply_note(llm_reply)}"
                 )
 
+        # Wakes the harness asks for are added when the Planner's own answer left
+        # them out: waking only adds capacity, so this never makes a step riskier
+        if planner_answered:
+            have_wake = {a["cell_id"] for a in proposed if a["action"] == "wake"}
+            surge_wake = tool_ctx.get("wake_candidates") or []
+            qos_wake = [] if any(a["action"] == "sleep" for a in proposed) else (static_wake_candidates or [])
+            for cids, reason in ((surge_wake, "surge imminent: proactive capacity restore"),
+                                 (qos_wake, "QoS below intent: restoring capacity")):
+                for cid in cids:
+                    if cid not in have_wake:
+                        proposed.append({"action": "wake", "cell_id": cid, "reason": reason})
+                        have_wake.add(cid)
+
         # Certified-blocker rule: enforced here, before Sim 1 and the Validator,
         # so neither LLM can sleep a cell that must be on air
-        rule_rejected: list[dict] = []
         role_blocked = tool_ctx.get("role_blocked") or {}
         if role_blocked:
             source = {cid: name for name, cells in role_blocked.items() for cid in cells}
-            rule_rejected = [
+            rule_rejected += [
                 {"action": "sleep", "cell_id": a["cell_id"],
                  "reason": f"certified rule: {source[a['cell_id']]} lists the cell as active"}
                 for a in proposed if a["action"] == "sleep" and a["cell_id"] in source

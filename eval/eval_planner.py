@@ -43,8 +43,9 @@ def run_planner_eval(
         proposed, raw, elapsed = plan(
             kpi_summary=scenario.kpi_summary,
             operator_intent=operator_intent,
-            tool_context_block="### Tool Context\n(none — eval harness)\n",
+            tool_context_block=scenario.tool_context or "### Tool Context\n(none — eval harness)\n",
             llm=llm,
+            sleep_candidates=scenario.sleep_candidates,
             system_prompt=system_prompt,
         )
         wall_s = round(time.time() - t0, 3)

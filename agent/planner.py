@@ -21,41 +21,25 @@ Your job is to output sleep/wake actions for N1 cells to save energy while meeti
 Respond with a JSON array of actions only — no explanation, no markdown fences.
 Each action: {"action": "sleep"|"wake", "cell_id": <int>, "reason": "<short reason>"}
 
-Follow this exact procedure:
+CASE A — the tool context has a "### Pre-computed Action Guidance" section.
+  The harness has already combined faults, forecast, interference, pricing, maintenance and
+  the throughput guard into that section. It is binding:
+  - Sleep the cells in its "SLEEP these cells" list, except a cell whose N12_PRB > 60% in
+    "Current Network KPIs" (its neighbours are already overloaded).
+  - Never sleep a cell that is not in that list, even one with low N1_PRB: it was left out
+    for a reason (fault, surge, interference, throughput guard, maintenance, PRB threshold).
+    If the list is empty, propose no sleep actions.
+  - Wake every cell in its "WAKE these cells" lines.
+  - Also wake any Sleeping cell whose N12_PRB > 60% in "Current Network KPIs".
 
-STEP 1 — Build the candidate list:
-  Start with all cell_ids that appear in "Current Network KPIs".
-  Remove cells listed under "Active faults" or "DO NOT sleep" in the tool context.
-  These are your SLEEP CANDIDATES.
+CASE B — there is no "### Pre-computed Action Guidance" section.
+  - Leave out cells listed under "Active faults" or "DO NOT sleep" in the tool context.
+  - Sleep each remaining Awake cell whose N1_PRB < 12%.
+    QoS=0.00 Mbps on an Awake cell means no active UEs: that is ideal for sleeping.
+  - Wake each Sleeping cell whose N12_PRB > 60% (a sleeping cell's own N1_PRB is always 0;
+    N12_PRB shows the load its neighbours carry for it).
 
-STEP 2 — Filter candidates by current KPI:
-  For each SLEEP CANDIDATE, look at its N1_PRB in "Current Network KPIs".
-  - If N1_PRB < 25% AND the cell is currently Awake → add a sleep action.
-    NOTE: QoS=0.00 Mbps on an Awake cell means NO active UEs — that is IDEAL for sleeping,
-    not a disqualifier. Only skip if active users would drop below the QoS threshold.
-  - If N1_PRB > 50% AND the cell is currently Sleeping → add a wake action.
-  - Otherwise → no action needed for that cell.
-
-STEP 2.5 — Apply energy pricing modifier (only if Energy pricing data is present):
-  Check current_tier in the Energy pricing section of the tool context:
-  - 'peak':     Electricity is expensive. Sleep ALL sleep candidates regardless of N1_PRB —
-                every sleeping cell maximises energy cost savings right now.
-                Include ALL candidates from STEP 2 in your output.
-                Include your reason: "peak pricing: maximising energy cost savings"
-  - 'shoulder': Apply normal thresholds from STEP 2. No modifier.
-  - 'off_peak': Electricity is cheap. Only sleep candidates with N1_PRB < 5% (very cold cells).
-                Skip candidates with 5% ≤ N1_PRB < 25% — savings are minimal at low prices.
-                Include your reason: "off_peak: conservative sleep, low cost savings"
-
-STEP 3 — Apply interference filter (only if interference data is present):
-  Remove sleep actions where the interference data shows OVERLOAD RISK (not SAFE).
-
-STEP 4 — Apply forecast filter (only if forecast data is present):
-  For each remaining sleep action, check if that cell_id appears in the forecast block.
-  If it does AND t+1 predicted_mbps > 5 × QoS_threshold → remove that sleep action.
-  If the cell has NO forecast entry → keep the sleep action (no concern).
-
-STEP 5 — Output the remaining actions as a JSON array. If empty, output [].
+Output the actions as a JSON array. If there are none, output [].
 """
 
 # Blueprint-equivalent prompt: mirrors the PRB thresholds from the blueprint

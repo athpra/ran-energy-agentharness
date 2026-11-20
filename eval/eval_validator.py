@@ -43,10 +43,8 @@ def run_validator_eval(
         assert scenario.risky_proposal_ids    is not None
         assert scenario.safe_proposal_ids     is not None
 
-        # Determine tool context: V03 scenario injects fault info
-        tool_context = "### Tool Context\n(none — eval harness)\n"
-        if hasattr(scenario, "_tool_ctx_override") and scenario._tool_ctx_override:
-            tool_context = scenario._tool_ctx_override
+        # The scenario's tool context (V03, V04 carry a fault), or none
+        tool_context = scenario.tool_context or "### Tool Context\n(none — eval harness)\n"
 
         t0 = time.time()
         approved, rejected, raw, elapsed = validate(
