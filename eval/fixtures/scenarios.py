@@ -261,10 +261,14 @@ SCENARIOS.append(EvalScenario(
 SCENARIOS.append(EvalScenario(
     id="S10_format_stress",
     description="Tests JSON format compliance when cell values are non-round numbers.",
+    # The prompt shows one decimal place, so values just inside a threshold
+    # must stay inside it once rounded: 11.94 shows as 11.9 (< 12, sleep) and
+    # 60.06 as 60.1 (> 60, wake). 11.999 and 60.001 showed as 12.0 and 60.0,
+    # which the rules leave alone.
     cells=[
         CellState(0, "S1/C1", n1_prb=0.123,  n12_prb=0.0,    avg_qos=0.001, n1_sleeping=False),
-        CellState(1, "S1/C2", n1_prb=11.999, n12_prb=0.0,    avg_qos=3.777, n1_sleeping=False),
-        CellState(2, "S2/C1", n1_prb=0.0,    n12_prb=60.001, avg_qos=0.0,   n1_sleeping=True),
+        CellState(1, "S1/C2", n1_prb=11.94,  n12_prb=0.0,    avg_qos=3.777, n1_sleeping=False),
+        CellState(2, "S2/C1", n1_prb=0.0,    n12_prb=60.06,  avg_qos=0.0,   n1_sleeping=True),
         CellState(3, "S2/C2", n1_prb=50.5,   n12_prb=0.0,    avg_qos=7.123, n1_sleeping=False),
     ],
     tags=["planner", "format", "boundary"],
