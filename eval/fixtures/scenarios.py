@@ -66,6 +66,9 @@ class EvalScenario:
     # Expected answers when the guidance, not the blueprint rules, decides
     expected_sleep:       Optional[list[int]]  = None
     expected_wake:        Optional[list[int]]  = None
+    # The network throughput shown in the first KPI line. None → the mean
+    # QoS of the awake cells, which near-idle cells drag far below intent.
+    shown_throughput_mbps: Optional[float]     = None
 
     @property
     def ground_truth_sleep(self) -> list[int]:
@@ -84,6 +87,8 @@ class EvalScenario:
         sleeping = sum(1 for c in self.cells if c.n1_sleeping)
         awake    = [c for c in self.cells if not c.n1_sleeping]
         avg_tp   = sum(c.avg_qos for c in awake) / len(awake) if awake else 0.0
+        if self.shown_throughput_mbps is not None:
+            avg_tp = self.shown_throughput_mbps
         lines    = [f"avg_throughput={avg_tp:.2f} Mbps  sleeping={sleeping}/{len(self.cells)}"]
         for c in sorted(self.cells, key=lambda x: x.cell_id):
             state = "Sleeping" if c.n1_sleeping else "Awake"
@@ -467,3 +472,15 @@ SCENARIOS.append(EvalScenario(
                   "  Sleep candidates (no active fault): [1]\n"),
     tags=["validator", "fault_rejection", "tool_context"],
 ))
+
+
+# ── Throughput shown in scenarios that expect sleeps ─────────────────────────
+# The mean per-cell QoS put these below the 5 Mbps intent (0.5-3.9 Mbps),
+# which no network the harness would sleep looks like: below intent×1.1 its
+# throughput guard blocks every sleep (G02). Nemotron read it that way once
+# (S05, 2026-11-21) and slept nothing. These scenarios test the PRB rules and
+# the guidance, so they show a network comfortably above intent.
+_ABOVE_INTENT_MBPS = 6.2
+for _s in SCENARIOS:
+    if not _s.is_validator_scenario and _s.ground_truth_sleep:
+        _s.shown_throughput_mbps = _ABOVE_INTENT_MBPS
