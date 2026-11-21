@@ -155,8 +155,55 @@ _TRAFFIC_PROFILES = [
 
 DEFAULT_THROUGHPUT_MBPS = 8.0
 SIM_DURATION            = 10   # seconds per simulation run
-SIM_MAX_RETRIES         = 5
-SIM_RETRY_DELAY_S       = 60
+# RSG retries. An RSG failure (e.g. "Data not written in Influx") waits each
+# delay in turn, so the run survives an outage of about 30 minutes. A 429
+# "Quota exceeded" waits out the cooldown the server reports and does not use
+# up an attempt; MAX_QUOTA_WAITS caps those waits so a run cannot hang forever.
+SIM_RETRY_DELAYS_S      = (60, 120, 240, 480, 900)
+SIM_MAX_ATTEMPTS        = len(SIM_RETRY_DELAYS_S) + 1
+MAX_QUOTA_WAITS         = 6
+QUOTA_FALLBACK_WAIT_S   = 1800
+
+
+def _quota_wait_s(exc: Exception) -> int | None:
+    """Seconds to wait when exc (or its cause) is an HTTP 429, else None."""
+    for e in (exc, exc.__cause__):
+        response = getattr(e, "response", None)
+        if getattr(response, "status_code", None) == 429:
+            try:
+                return int(response.json().get("cooldown_remaining_seconds", QUOTA_FALLBACK_WAIT_S)) + 60
+            except Exception:
+                return QUOTA_FALLBACK_WAIT_S + 60
+    return None
+
+
+def with_rsg_retries(attempt_fn, label: str = "RSG simulation", sleep=None):
+    """Call attempt_fn() until it succeeds, waiting between failures (see
+    SIM_RETRY_DELAYS_S). Raises RuntimeError when the attempts or quota waits
+    run out."""
+    import time as _time
+    sleep = sleep or _time.sleep
+    failures = quota_waits = 0
+    while True:
+        try:
+            return attempt_fn()
+        except Exception as exc:
+            wait_s = _quota_wait_s(exc)
+            if wait_s is not None:
+                quota_waits += 1
+                if quota_waits > MAX_QUOTA_WAITS:
+                    raise RuntimeError(f"{label} failed: RSG quota still exceeded after "
+                                       f"{MAX_QUOTA_WAITS} cooldowns") from exc
+                print(f"  RSG quota exceeded ({quota_waits}/{MAX_QUOTA_WAITS}); "
+                      f"waiting {wait_s}s for the cooldown (not counted as an attempt)...")
+            else:
+                failures += 1
+                if failures >= SIM_MAX_ATTEMPTS:
+                    raise RuntimeError(f"{label} failed after {SIM_MAX_ATTEMPTS} attempts") from exc
+                wait_s = SIM_RETRY_DELAYS_S[failures - 1]
+                print(f"  RSG error in {label} (attempt {failures}/{SIM_MAX_ATTEMPTS}): {exc}. "
+                      f"Retrying in {wait_s}s...")
+            sleep(wait_s)
 
 
 def _get_profile(ts: pd.Timestamp) -> dict:
@@ -266,55 +313,35 @@ def make_sim_fns(scenario):
         scenario.config["System"]["batch_mode"] = True
         scenario.config["System"]["duration"]   = SIM_DURATION
 
-        last_exc: Exception | None = None
-        for attempt in range(SIM_MAX_RETRIES):
-            try:
-                sim = scenario.simulation(force_start=True, adk_pace=True)
-                sim.start()
+        def _attempt():
+            sim = scenario.simulation(force_start=True, adk_pace=True)
+            sim.start()
 
-                # Replay accumulated sleep state so each fresh simulation starts from
-                # the current network configuration, not a clean slate.
-                # Small delay between commands avoids 409 CONFLICT from the SBA
-                # endpoint when many cells need to be replayed simultaneously.
-                for cell_name, is_sleeping in cell_sleep_state.items():
-                    cmd = "turn_off" if is_sleeping else "turn_on"
-                    sim.command(cmd, cell=cell_name, reason="accumulated state")
-                    if not _is_mock(scenario):
-                        _time.sleep(0.15)
+            # Replay accumulated sleep state so each fresh simulation starts from
+            # the current network configuration, not a clean slate.
+            # Small delay between commands avoids 409 CONFLICT from the SBA
+            # endpoint when many cells need to be replayed simultaneously.
+            for cell_name, is_sleeping in cell_sleep_state.items():
+                cmd = "turn_off" if is_sleeping else "turn_on"
+                sim.command(cmd, cell=cell_name, reason="accumulated state")
+                if not _is_mock(scenario):
+                    _time.sleep(0.15)
 
-                # Apply new actions for this iteration
-                for a in (actions or []):
-                    cell_name = cell_name_map.get(a["cell_id"], str(a["cell_id"]))
-                    if a["action"] == "sleep":
-                        sim.command("turn_off", cell=cell_name, reason=a.get("reason", "energy optimization"))
-                    elif a["action"] == "wake":
-                        sim.command("turn_on",  cell=cell_name, reason=a.get("reason", "capacity needed"))
+            # Apply new actions for this iteration
+            for a in (actions or []):
+                cell_name = cell_name_map.get(a["cell_id"], str(a["cell_id"]))
+                if a["action"] == "sleep":
+                    sim.command("turn_off", cell=cell_name, reason=a.get("reason", "energy optimization"))
+                elif a["action"] == "wake":
+                    sim.command("turn_on",  cell=cell_name, reason=a.get("reason", "capacity needed"))
 
-                sim.run_for(f"{SIM_DURATION}s")
-                sim_ue   = sim.query("UEReports",   start=SIM_DURATION - 1, stop=SIM_DURATION)
-                sim_cell = sim.query("CellReports", start=SIM_DURATION - 1, stop=SIM_DURATION)
-                sim.finish()
-                break  # success
+            sim.run_for(f"{SIM_DURATION}s")
+            sim_ue   = sim.query("UEReports",   start=SIM_DURATION - 1, stop=SIM_DURATION)
+            sim_cell = sim.query("CellReports", start=SIM_DURATION - 1, stop=SIM_DURATION)
+            sim.finish()
+            return sim_ue, sim_cell
 
-            except (RuntimeError, Exception) as exc:
-                last_exc = exc
-                # 429 quota exceeded — wait for the cooldown the server reports
-                wait_s = SIM_RETRY_DELAY_S
-                cause = exc.__cause__ or exc
-                if hasattr(cause, "response") and getattr(cause.response, "status_code", None) == 429:
-                    try:
-                        cooldown = cause.response.json().get("cooldown_remaining_seconds", 1800)
-                        wait_s = int(cooldown) + 60  # add 1 min buffer
-                    except Exception:
-                        wait_s = 1860
-                if attempt < SIM_MAX_RETRIES - 1:
-                    print(f"  RSG error (attempt {attempt + 1}/{SIM_MAX_RETRIES}): {exc}. "
-                          f"Retrying in {wait_s}s...")
-                    _time.sleep(wait_s)
-                else:
-                    raise RuntimeError(
-                        f"RSG simulation failed after {SIM_MAX_RETRIES} attempts"
-                    ) from last_exc
+        sim_ue, sim_cell = with_rsg_retries(_attempt, "RSG simulation")
 
         sim_cell = sim_cell.drop_duplicates(subset=["Viavi.Cell.Name"], keep="last").reset_index(drop=True)
 
@@ -539,35 +566,16 @@ def get_current_kpis(scenario, timestamp: pd.Timestamp | None = None) -> dict:
     scenario.config["System"]["batch_mode"] = True
     scenario.config["System"]["duration"]   = SIM_DURATION
 
-    import time as _time
-    last_exc: Exception | None = None
-    for attempt in range(SIM_MAX_RETRIES):
-        try:
-            sim = scenario.simulation(force_start=True, adk_pace=True)
-            sim.start()
-            sim.run_for(f"{SIM_DURATION}s")
-            sim_ue   = sim.query("UEReports",   start=SIM_DURATION - 1, stop=SIM_DURATION)
-            sim_cell = sim.query("CellReports", start=SIM_DURATION - 1, stop=SIM_DURATION)
-            sim.finish()
-            break
-        except Exception as exc:
-            last_exc = exc
-            wait_s = SIM_RETRY_DELAY_S
-            cause = exc.__cause__ or exc
-            if hasattr(cause, "response") and getattr(cause.response, "status_code", None) == 429:
-                try:
-                    cooldown = cause.response.json().get("cooldown_remaining_seconds", 1800)
-                    wait_s = int(cooldown) + 60
-                except Exception:
-                    wait_s = 1860
-            if attempt < SIM_MAX_RETRIES - 1:
-                print(f"  RSG error in get_current_kpis (attempt {attempt + 1}/{SIM_MAX_RETRIES}): {exc}. "
-                      f"Retrying in {wait_s}s...")
-                _time.sleep(wait_s)
-            else:
-                raise RuntimeError(
-                    f"get_current_kpis failed after {SIM_MAX_RETRIES} attempts"
-                ) from last_exc
+    def _attempt():
+        sim = scenario.simulation(force_start=True, adk_pace=True)
+        sim.start()
+        sim.run_for(f"{SIM_DURATION}s")
+        sim_ue   = sim.query("UEReports",   start=SIM_DURATION - 1, stop=SIM_DURATION)
+        sim_cell = sim.query("CellReports", start=SIM_DURATION - 1, stop=SIM_DURATION)
+        sim.finish()
+        return sim_ue, sim_cell
+
+    sim_ue, sim_cell = with_rsg_retries(_attempt, "get_current_kpis")
 
     sim_cell = sim_cell.drop_duplicates(subset=["Viavi.Cell.Name"], keep="last").reset_index(drop=True)
     return _compute_kpis(sim_ue, sim_cell)
