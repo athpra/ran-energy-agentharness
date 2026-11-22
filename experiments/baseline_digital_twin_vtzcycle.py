@@ -23,6 +23,9 @@ from dotenv import find_dotenv, load_dotenv
 from agent.harness  import AgentHarness
 from agent.planner  import BLUEPRINT_SYSTEM_PROMPT
 from experiments.common import (
+    Resume,
+    add_resume_arg,
+    load_resume,
     apply_job_arguments,
     connect_scenario,
     get_llm,
@@ -41,9 +44,11 @@ def run(
     condition_name: str = "baseline_digital_twin_vtzcycle",
     run_dir=None,
     model_id: str = "",
+    resume: Resume | None = None,
 ) -> list[dict]:
     llm = get_llm()
-    sim_test_fn, sim_apply_fn, set_virtual_ts = make_sim_fns(scenario)
+    sim_test_fn, sim_apply_fn, set_virtual_ts = make_sim_fns(
+        scenario, replay_actions=resume.applied if resume else None)
 
     harness = AgentHarness(
         llm=llm,
@@ -54,9 +59,9 @@ def run(
         planner_system_prompt=BLUEPRINT_SYSTEM_PROMPT,
     )
 
-    ts = pd.Timestamp.now().normalize()  # midnight today; used for tool context timestamps
+    ts = resume.base_ts if resume else pd.Timestamp.now().normalize()  # virtual midnight
 
-    for i in range(n_iterations):
+    for i in range(resume.done if resume else 0, n_iterations):
         virtual_ts = ts + pd.Timedelta(minutes=15 * i)
 
         # Set virtual timestamp so all sim calls use the right traffic profile
@@ -140,22 +145,27 @@ def main():
     parser.add_argument("--intent",     default="3 Mbps")
     parser.add_argument("--iterations", type=int, default=int(os.environ.get("ITER", 96)))
     parser.add_argument("--rsg-host",   default=os.getenv("RSG_HOST", ""))
+    add_resume_arg(parser)
     args, _ = parser.parse_known_args()
 
     model_id = os.getenv("LLM_MODEL", "")
     model_slug = model_id.split("/")[-1] if model_id else "llm"
 
-    scenario = connect_scenario(args.rsg_host)
-    run_dir  = make_run_dir("baseline_digital_twin_vtzcycle", model_slug)
+    resume = load_resume(args.resume, {"condition": "baseline_digital_twin_vtzcycle", "intent": args.intent,
+                           "iterations": args.iterations}) if args.resume else None
 
-    save_run_config(run_dir, {
-        "condition":       "baseline_digital_twin_vtzcycle",
-        "planner_model":   model_id,
-        "validator_model": model_id,
-        "intent":          args.intent,
-        "iterations":      args.iterations,
-        "tools":           [],
-    })
+    scenario = connect_scenario(args.rsg_host)
+    run_dir  = resume.run_dir if resume else make_run_dir("baseline_digital_twin_vtzcycle", model_slug)
+
+    if not resume:   # a resumed run keeps its own run_config.json
+        save_run_config(run_dir, {
+            "condition":       "baseline_digital_twin_vtzcycle",
+            "planner_model":   model_id,
+            "validator_model": model_id,
+            "intent":          args.intent,
+            "iterations":      args.iterations,
+            "tools":           [],
+        })
 
     print(
         f"Running: baseline_digital_twin_vtzcycle  "
@@ -163,7 +173,7 @@ def main():
     )
     print(f"  Saving incrementally to: {run_dir}")
 
-    run(scenario, args.intent, args.iterations, run_dir=run_dir, model_id=model_id)
+    run(scenario, args.intent, args.iterations, run_dir=run_dir, model_id=model_id, resume=resume)
 
 
 if __name__ == "__main__":

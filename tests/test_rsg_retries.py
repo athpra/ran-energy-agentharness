@@ -70,7 +70,7 @@ def test_a_wrapped_quota_error_is_recognised():
 
 
 def test_retries_and_quota_waits_are_bounded():
-    for outcomes, why in [([INFLUX] * SIM_MAX_ATTEMPTS, "after 6 attempts"),
+    for outcomes, why in [([INFLUX] * SIM_MAX_ATTEMPTS, f"after {SIM_MAX_ATTEMPTS} attempts"),
                           ([HTTPError()] * (MAX_QUOTA_WAITS + 1), "quota still exceeded")]:
         try:
             with_rsg_retries(_attempts(*outcomes), sleep=lambda s: None)

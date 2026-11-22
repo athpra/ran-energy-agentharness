@@ -156,10 +156,12 @@ _TRAFFIC_PROFILES = [
 DEFAULT_THROUGHPUT_MBPS = 8.0
 SIM_DURATION            = 10   # seconds per simulation run
 # RSG retries. An RSG failure (e.g. "Data not written in Influx") waits each
-# delay in turn, so the run survives an outage of about 30 minutes. A 429
-# "Quota exceeded" waits out the cooldown the server reports and does not use
-# up an attempt; MAX_QUOTA_WAITS caps those waits so a run cannot hang forever.
-SIM_RETRY_DELAYS_S      = (60, 120, 240, 480, 900)
+# delay in turn: a backoff of 1-8 minutes, then every 15 minutes, so the run
+# survives an outage of about 2.5 hours (the outage of 2026-11-21 lasted over
+# 40 minutes). A 429 "Quota exceeded" waits out the cooldown the server reports
+# and does not use up an attempt; MAX_QUOTA_WAITS caps those waits so a run
+# cannot hang forever. A run that still fails can be resumed (--resume).
+SIM_RETRY_DELAYS_S      = (60, 120, 240, 480) + (900,) * 8
 SIM_MAX_ATTEMPTS        = len(SIM_RETRY_DELAYS_S) + 1
 MAX_QUOTA_WAITS         = 6
 QUOTA_FALLBACK_WAIT_S   = 1800
@@ -258,7 +260,7 @@ def _is_mock(scenario) -> bool:
     return type(scenario).__module__.startswith("mock_rsg")
 
 
-def make_sim_fns(scenario):
+def make_sim_fns(scenario, replay_actions: list[dict] | None = None):
     """
     Return (sim_test_fn, sim_apply_fn, set_virtual_ts).
 
@@ -279,6 +281,8 @@ def make_sim_fns(scenario):
     - sim_test_fn does NOT update accumulated state (probe only).
     - sim_apply_fn DOES update accumulated state (confirmed actions).
     - Traffic profile (UE count) is set from current_vts (set via set_virtual_ts).
+    - replay_actions: the actions a resumed run already applied (see
+      load_resume); they rebuild the accumulated sleep state.
     """
     cell_sleep_state:   dict[str, bool]       = {}   # cell_name -> is_sleeping
     cell_name_map:      dict[int, str]         = {}   # int id -> full VIAVI name
@@ -409,7 +413,76 @@ def make_sim_fns(scenario):
             f"Night={_night_thp:.2f} Mbps/UE, Morning={_morning_thp:.2f} Mbps/UE"
         )
 
+    if replay_actions:
+        replay_sleep_state(cell_sleep_state, cell_name_map, replay_actions)
+        print(f"Resumed sleep state: {sum(cell_sleep_state.values())} of "
+              f"{len(cell_name_map)} N1 cells asleep.")
+
     return sim_test_fn, sim_apply_fn, set_virtual_ts
+
+
+def replay_sleep_state(cell_sleep_state: dict, cell_name_map: dict, actions: list[dict]) -> None:
+    """Apply actions, in order, to the accumulated sleep state, as sim_apply_fn does."""
+    for a in actions:
+        cell_sleep_state[cell_name_map.get(a["cell_id"], str(a["cell_id"]))] = (a["action"] == "sleep")
+
+
+# ── Resuming a run ────────────────────────────────────────────────────────────
+
+def add_resume_arg(parser) -> None:
+    parser.add_argument(
+        "--resume", default=None, metavar="RUN_DIR",
+        help="Continue a run that stopped early (e.g. an RSG outage) in its own folder: "
+             "output/<run folder> or its name. The other arguments must match the run's.",
+    )
+
+
+class Resume:
+    """What a resumed run needs from the iterations a stopped run saved."""
+
+    def __init__(self, run_dir: Path, config: dict, iterations: list[dict]):
+        self.run_dir = run_dir
+        self.config  = config
+        self.done    = len(iterations)
+        # actions applied so far, in order: they rebuild the sleep state
+        self.applied = [a for it in iterations for a in (it.get("approved_actions") or [])]
+        # the run's virtual midnight, so resumed iterations keep the same clock
+        first_ts = iterations[0].get("timestamp") if iterations else None
+        self.base_ts = (pd.Timestamp(first_ts).normalize() if first_ts
+                        else pd.Timestamp.now().normalize())
+        last = iterations[-1] if iterations else {}
+        self.last_sleeping = (last.get("post_kpis") or {}).get(
+            "sleeping_cells", (last.get("pre_kpis") or {}).get("sleeping_cells"))
+
+
+def load_resume(run_dir: str | Path, expected: dict) -> Resume:
+    """Read a stopped run so it can continue. expected: run_config.json values
+    the new invocation must match (condition, intent, iterations, ...)."""
+    path = Path(run_dir)
+    if not path.exists():
+        path = OUTPUT_DIR / Path(run_dir).name
+    config_path, its_path = path / "run_config.json", path / "iterations.jsonl"
+    if not config_path.exists():
+        raise SystemExit(f"--resume: no run_config.json in {path}")
+    config = json.loads(config_path.read_text())
+    for key, value in expected.items():
+        if config.get(key) != value:
+            raise SystemExit(f"--resume: {key} is {config.get(key)!r} in {path.name}, "
+                             f"but {value!r} now. Use the arguments the run started with.")
+    its = [json.loads(line) for line in open(its_path)] if its_path.exists() else []
+    its = [it for it in its if it]
+    if [it.get("iteration") for it in its] != list(range(1, len(its) + 1)):
+        raise SystemExit(f"--resume: the iterations in {its_path} are not 1..{len(its)} in order")
+    if len(its) >= config.get("iterations", 0):
+        raise SystemExit(f"--resume: {path.name} is already complete ({len(its)} iterations)")
+    config.setdefault("resumed", []).append(
+        {"at_iteration": len(its) + 1, "time": datetime.now().isoformat(timespec="seconds")})
+    config_path.write_text(json.dumps(config, indent=2))
+    r = Resume(path, config, its)
+    print(f"Resuming {path.name} at iteration {r.done + 1} of {config['iterations']} "
+          f"({len(r.applied)} applied actions to replay; the last iteration ended with "
+          f"{r.last_sleeping} cells asleep).")
+    return r
 
 
 # ── Continuous VTZ-cycle simulation ──────────────────────────────────────────

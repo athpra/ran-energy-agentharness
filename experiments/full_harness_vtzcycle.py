@@ -18,6 +18,9 @@ role (e.g. maintenance_windows, a cell_blocker) are read by their role reader
 
 Run:
     python experiments/full_harness_vtzcycle.py --intent "3 Mbps" --iterations 96
+
+A run that stops early (e.g. an RSG outage) continues in its own folder with
+the same arguments plus --resume output/<run folder>.
 """
 from __future__ import annotations
 
@@ -31,10 +34,13 @@ import pandas as pd
 from agent.harness import AgentHarness
 from agent.context import ALL_TOOLS
 from agent.catalog import load_catalog
-from agent.discovery import add_discovery_args, discover
+from agent.discovery import add_discovery_args, discover, resolve
 from agent.policy import DEFAULT_POLICY, Policy, load_policy, tunable_params
 from experiments.common import (
+    Resume,
+    add_resume_arg,
     apply_job_arguments,
+    load_resume,
     connect_scenario,
     get_llm,
     get_validator_llm,
@@ -62,11 +68,13 @@ def run(
     validator_llm=None,
     verbose: bool = True,
     bindings: dict[str, dict] | None = None,
+    resume: Resume | None = None,
 ) -> list[dict]:
     # llm / validator_llm let the policy tuner pass stand-ins instead of endpoints
     llm           = llm or get_llm(model)
     validator_llm = validator_llm or get_validator_llm(validator_model)
-    sim_test_fn, sim_apply_fn, set_virtual_ts = make_sim_fns(scenario)
+    sim_test_fn, sim_apply_fn, set_virtual_ts = make_sim_fns(
+        scenario, replay_actions=resume.applied if resume else None)
 
     harness = AgentHarness(
         llm=llm,
@@ -79,9 +87,10 @@ def run(
         bindings=bindings,
     )
 
-    ts = pd.Timestamp.now().normalize()  # midnight today; iterations advance virtually
+    # midnight today (or the resumed run's); iterations advance virtually
+    ts = resume.base_ts if resume else pd.Timestamp.now().normalize()
 
-    for i in range(n_iterations):
+    for i in range(resume.done if resume else 0, n_iterations):
         virtual_ts = ts + pd.Timedelta(minutes=15 * i)
 
         # Set virtual timestamp so all sim calls use the right traffic profile
@@ -173,13 +182,22 @@ def main():
         "--policy", default=None,
         help="Policy file with the harness thresholds (e.g. policies/tuned.yaml). Default: built-in values.",
     )
+    add_resume_arg(parser)
     args, _ = parser.parse_known_args()
     policy = load_policy(args.policy)
 
     enabled    = frozenset(args.tools)
     discovery  = None
+    resume     = load_resume(args.resume, {"intent": args.intent, "iterations": args.iterations,
+                                           "policy": {"name": policy.name, **tunable_params(policy)}}) \
+        if args.resume else None
     if args.discover:
-        discovery = discover(get_llm(args.model), args.intent, load_catalog(args.catalog))
+        saved = (resume.config.get("discovery") if resume else None)
+        if saved:   # keep the datasets the run chose, without asking the LLM again
+            discovery = resolve([{"dataset": n, "reason": saved.get("reasons", {}).get(n, "")}
+                                 for n in saved["selected"]], load_catalog(args.catalog))
+        else:
+            discovery = discover(get_llm(args.model), args.intent, load_catalog(args.catalog))
         enabled   = discovery.enabled_tools
         print(discovery.summary())
     model_slug = args.model.split("/")[-1] if args.model else os.getenv("LLM_MODEL", "llm").split("/")[-1]
@@ -198,21 +216,26 @@ def main():
     planner_id   = args.model or os.getenv("LLM_MODEL", "")
     validator_id = args.validator_model or os.getenv("VALIDATOR_MODEL", "") or planner_id
 
+    if resume and resume.config.get("condition") != condition:
+        raise SystemExit(f"--resume: the run is {resume.config.get('condition')!r}, "
+                         f"these arguments make {condition!r}")
+
     scenario = connect_scenario(args.rsg_host)
-    run_dir  = make_run_dir(label, model_slug)
+    run_dir  = resume.run_dir if resume else make_run_dir(label, model_slug)
 
     val_slug = validator_id.split("/")[-1] if validator_id else model_slug  # same resolution as get_validator_llm
 
-    save_run_config(run_dir, {
-        "condition":       condition,
-        "planner_model":   planner_id,
-        "validator_model": validator_id,
-        "intent":          args.intent,
-        "iterations":      args.iterations,
-        "tools":           sorted(enabled),
-        "policy":          {"name": policy.name, **tunable_params(policy)},
-        **({"discovery": discovery.to_dict()} if discovery is not None else {}),
-    })
+    if not resume:   # a resumed run keeps its own run_config.json
+        save_run_config(run_dir, {
+            "condition":       condition,
+            "planner_model":   planner_id,
+            "validator_model": validator_id,
+            "intent":          args.intent,
+            "iterations":      args.iterations,
+            "tools":           sorted(enabled),
+            "policy":          {"name": policy.name, **tunable_params(policy)},
+            **({"discovery": discovery.to_dict()} if discovery is not None else {}),
+        })
 
     print(f"Running: {condition}")
     print(f"  planner={model_slug}  validator={val_slug}  tools={sorted(enabled)}  intent='{args.intent}'  iterations={args.iterations}")
@@ -221,7 +244,7 @@ def main():
     run(scenario, args.intent, args.iterations, enabled, condition, args.model,
         args.validator_model, run_dir=run_dir,
         planner_model_id=planner_id, validator_model_id=validator_id, policy=policy,
-        bindings=discovery.bindings if discovery is not None else None)
+        bindings=discovery.bindings if discovery is not None else None, resume=resume)
 
 
 if __name__ == "__main__":

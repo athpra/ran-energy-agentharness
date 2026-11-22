@@ -19,12 +19,14 @@ from dotenv import find_dotenv, load_dotenv
 
 from agent.planner import plan
 from experiments.common import (
+    Resume,
+    add_resume_arg,
+    load_resume,
     apply_job_arguments,
     connect_scenario,
     get_llm,
     make_run_dir,
     make_sim_fns,
-    save_results,
     save_run_config,
     append_result,
     _kpi_to_text_viavi,
@@ -55,14 +57,16 @@ def run(
     condition_name: str = "baseline_openloop_vtzcycle",
     run_dir=None,
     model_id: str = "",
+    resume: Resume | None = None,
 ) -> list[dict]:
     llm = get_llm()
-    sim_test_fn, sim_apply_fn, set_virtual_ts = make_sim_fns(scenario)
+    sim_test_fn, sim_apply_fn, set_virtual_ts = make_sim_fns(
+        scenario, replay_actions=resume.applied if resume else None)
 
-    ts = pd.Timestamp.now().normalize()
+    ts = resume.base_ts if resume else pd.Timestamp.now().normalize()  # virtual midnight
 
     results = []
-    for i in range(n_iterations):
+    for i in range(resume.done if resume else 0, n_iterations):
         t0         = time.time()
         virtual_ts = ts + pd.Timedelta(minutes=15 * i)
 
@@ -146,6 +150,7 @@ def run(
 
         r = {
             "iteration":         i + 1,
+            "timestamp":         str(virtual_ts),
             "condition":         condition_name,
             "tools_used":        [],
             "proposed_actions":  proposed,
@@ -188,22 +193,27 @@ def main():
     parser.add_argument("--intent",     default="3 Mbps")
     parser.add_argument("--iterations", type=int, default=int(os.environ.get("ITER", 96)))
     parser.add_argument("--rsg-host",   default=os.getenv("RSG_HOST", ""))
+    add_resume_arg(parser)
     args, _ = parser.parse_known_args()
 
     model_id   = os.getenv("LLM_MODEL", "")
     model_slug = model_id.split("/")[-1] if model_id else "llm"
 
-    scenario = connect_scenario(args.rsg_host)
-    run_dir  = make_run_dir("baseline_openloop_vtzcycle", model_slug)
+    resume = load_resume(args.resume, {"condition": "baseline_openloop_vtzcycle", "intent": args.intent,
+                           "iterations": args.iterations}) if args.resume else None
 
-    save_run_config(run_dir, {
-        "condition":       "baseline_openloop_vtzcycle",
-        "planner_model":   model_id,
-        "validator_model": "",
-        "intent":          args.intent,
-        "iterations":      args.iterations,
-        "tools":           [],
-    })
+    scenario = connect_scenario(args.rsg_host)
+    run_dir  = resume.run_dir if resume else make_run_dir("baseline_openloop_vtzcycle", model_slug)
+
+    if not resume:   # a resumed run keeps its own run_config.json
+        save_run_config(run_dir, {
+            "condition":       "baseline_openloop_vtzcycle",
+            "planner_model":   model_id,
+            "validator_model": "",
+            "intent":          args.intent,
+            "iterations":      args.iterations,
+            "tools":           [],
+        })
 
     print(
         f"Running: baseline_openloop_vtzcycle  "
@@ -211,8 +221,9 @@ def main():
     )
     print(f"  Saving incrementally to: {run_dir}")
 
-    results = run(scenario, args.intent, args.iterations, run_dir=run_dir, model_id=model_id)
-    save_results(run_dir, results)
+    # each iteration is appended as it runs; rewriting the file here would drop
+    # the iterations a resumed run did before it stopped
+    run(scenario, args.intent, args.iterations, run_dir=run_dir, model_id=model_id, resume=resume)
 
 
 if __name__ == "__main__":
