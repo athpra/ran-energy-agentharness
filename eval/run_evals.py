@@ -103,6 +103,10 @@ def run_evals(
         .replace(" ", "_")
     )
     filename = out_path / f"eval_{run_id}_{model_tag}.json"
+    k = 2
+    while filename.exists():   # two runs in the same second must not overwrite each other
+        filename = out_path / f"eval_{run_id}_{model_tag}_{k}.json"
+        k += 1
     filename.write_text(json.dumps(result, indent=2, default=str))
     print(f"\nResults saved: {filename}")
 

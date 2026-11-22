@@ -23,6 +23,12 @@ Run:
     cp eval/models.example.yaml eval/models.yaml     # list your models
     python -m eval.benchmark                         # --models defaults to eval/models.yaml
     python -m eval.benchmark --suites discovery --runs 5
+    python -m eval.benchmark --suites planner validator --repeat 3
+
+--repeat N runs the planner/validator evals N times per model (discovery has
+its own --runs); summary.txt then adds an "Across runs" table: per model, how
+many runs got every scenario right, the worst and mean scores, and which
+scenarios were missed in how many runs.
 
 As a CML Job: Script eval/benchmark.py; options, if any, go in the job's
 Arguments field (e.g. --suites discovery --runs 5).
@@ -89,6 +95,8 @@ def main():
                         help="YAML file listing the models (default: eval/models.yaml)")
     parser.add_argument("--suites", nargs="+", choices=SUITES, default=list(SUITES))
     parser.add_argument("--runs",   type=int, default=10, help="Discovery runs per mode")
+    parser.add_argument("--repeat", type=int, default=1,
+                        help="Planner/validator runs per model (default 1)")
     parser.add_argument("--intent", default="5 Mbps")
     parser.add_argument("--timeout", type=float, default=300,
                         help="Seconds per request, unless a model sets its own timeout (default 300; "
@@ -101,6 +109,8 @@ def main():
     if unknown:
         print(f"Ignoring arguments: {unknown}")
 
+    if args.repeat < 1:
+        sys.exit("--repeat must be at least 1")
     if not args.models.exists():
         sys.exit(f"No models file at {args.models}. Copy eval/models.example.yaml to it and list your models.")
     models = load_models(args.models)
@@ -120,7 +130,8 @@ def main():
     for m in models:
         m["timeout"] = m["timeout"] or args.timeout
     manifest = {"started": now.isoformat(), "models": models, "suites": args.suites,
-                "discovery_runs": args.runs, "intent": args.intent,
+                "discovery_runs": args.runs, "planner_validator_runs": args.repeat,
+                "intent": args.intent,
                 "drafted_catalog": str(drafted) if drafted else None, "failures": []}
 
     from experiments.common import get_llm
@@ -132,10 +143,12 @@ def main():
         llm = get_llm(m["id"], m["api_base"], m["timeout"])
         steps = []
         if "planner" in args.suites or "validator" in args.suites:
-            steps.append(("planner/validator", lambda: run_evals(
-                output_dir=out, operator_intent=args.intent, llm=llm, verbose=False,
-                planner_only="validator" not in args.suites,
-                validator_only="planner" not in args.suites)))
+            for run in range(1, args.repeat + 1):
+                name = "planner/validator" + (f" run {run}/{args.repeat}" if args.repeat > 1 else "")
+                steps.append((name, lambda: run_evals(
+                    output_dir=out, operator_intent=args.intent, llm=llm, verbose=False,
+                    planner_only="validator" not in args.suites,
+                    validator_only="planner" not in args.suites)))
         if "discovery" in args.suites:
             for catalog, no_policy in discovery_modes(drafted):
                 name = f"discovery {catalog.stem} policy={'off' if no_policy else 'on'}"
